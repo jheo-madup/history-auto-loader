@@ -366,11 +366,11 @@ class HistoryLogicTest(unittest.TestCase):
 
         self.assertEqual(
             first_line,
-            "*<https://docs.google.com/spreadsheets/d/1-pcaJCyUc3_DQPuNNZgDvc433Cdo2DbrwFsxLbxv95g/edit?gid=1211091820#gid=1211091820|SA / AC 히스토리 자동 적재 완료>* - 수동 변경 내역 기준",
+            "*<https://docs.google.com/spreadsheets/d/1-pcaJCyUc3_DQPuNNZgDvc433Cdo2DbrwFsxLbxv95g/edit?gid=1211091820#gid=1211091820|SA / AC 히스토리 자동 적재 완료>* - :red_circle: 수동 변경 내역 기준",
         )
         self.assertTrue(first_line.startswith("*<https://"))
-        self.assertIn("|SA / AC 히스토리 자동 적재 완료>* - 수동 변경 내역 기준", first_line)
-        self.assertNotIn("* - 수동 변경 내역 기준*", first_line)
+        self.assertIn("|SA / AC 히스토리 자동 적재 완료>* - :red_circle: 수동 변경 내역 기준", first_line)
+        self.assertNotIn("* - :red_circle: 수동 변경 내역 기준*", first_line)
 
     def test_slack_media_counts_use_final_daily_raw_rows(self) -> None:
         rows = [

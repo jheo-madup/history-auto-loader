@@ -116,7 +116,7 @@ def format_slack_summary_message(
         spreadsheet_id = str(spreadsheet_id or DEFAULT_SPREADSHEET_ID).strip()
         url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit?gid=1211091820#gid=1211091820"
     lines = [
-        f"*<{url}|SA / AC 히스토리 자동 적재 완료>* - 수동 변경 내역 기준",
+        f"*<{url}|SA / AC 히스토리 자동 적재 완료>* - :red_circle: 수동 변경 내역 기준",
         "",
     ]
     lines.extend(f"{media}: {normalized_counts.get(media, 0)}건" for media in SLACK_MEDIA_ORDER)
