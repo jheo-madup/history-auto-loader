@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from collectors.auto_bid_sheet_change import build_auto_bid_rows_from_log_records
 from processors.filters import should_keep_raw
+from processors.google_media_router import classify_google_media
 from processors.summarizer import build_summary
 from utils.hash_utils import attach_row_hash, build_row_hash
 from writers.ad_index_reader import CampaignMediaIndex
@@ -223,6 +224,15 @@ class HistoryLogicTest(unittest.TestCase):
 
         self.assertTrue(should_keep_raw(row))
         self.assertEqual(build_summary([row], "구글SA"), "[m_국내_일반] 소재 OFF 1건")
+
+    def test_google_pmax_campaign_with_suffix_routes_to_ac(self) -> None:
+        row = _row(
+            media="구글SA",
+            campaign="gg_all_web_all_non_non_ao-success_pmax_2604",
+            ad_group="",
+        )
+
+        self.assertEqual(classify_google_media(row, ac_customer_ids=set()), "구글AC")
 
     def test_row_hash_ignores_media_after_index_routing(self) -> None:
         naver_row = _row(campaign="브랜드검색", ad_group="2508_금융상품_ml-listing", media="네이버SA")

@@ -7,9 +7,9 @@ from typing import Any
 AC_PATTERNS = tuple(
     re.compile(pattern, re.I)
     for pattern in (
-        r"\bp[\s_-]?max\b",
-        r"\bperformance[\s_-]?max\b",
-        r"\bperf[\s_-]?max\b",
+        r"(?<![a-z0-9])p[\s_-]?max(?![a-z0-9])",
+        r"(?<![a-z0-9])performance[\s_-]?max(?![a-z0-9])",
+        r"(?<![a-z0-9])perf[\s_-]?max(?![a-z0-9])",
         r"실적\s*최대화",
         r"앱\s*캠페인",
         r"\bapp[\s_-]?campaign\b",
