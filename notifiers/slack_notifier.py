@@ -9,10 +9,13 @@ from typing import Any, Mapping
 
 SLACK_POST_MESSAGE_URL = "https://slack.com/api/chat.postMessage"
 DEFAULT_SPREADSHEET_ID = "1-pcaJCyUc3_DQPuNNZgDvc433Cdo2DbrwFsxLbxv95g"
+DEFAULT_SUMMARY_SPREADSHEET_URL = (
+    "https://docs.google.com/spreadsheets/d/"
+    "1-pcaJCyUc3_DQPuNNZgDvc433Cdo2DbrwFsxLbxv95g/edit?gid=1211091820#gid=1211091820"
+)
 SLACK_MEDIA_ORDER = ("네이버SA", "구글SA", "구글AC", "네이버 파워컨텐츠", "브랜드검색")
 SLACK_MEDIA_ALIASES = {
     "네이버SA_파워콘텐츠": "네이버 파워컨텐츠",
-    "네이버SA_파워컨텐츠": "네이버 파워컨텐츠",
     "네이버 파워콘텐츠": "네이버 파워컨텐츠",
     "BS - 네이버": "브랜드검색",
     "네이버 브랜드검색": "브랜드검색",
@@ -105,16 +108,29 @@ def format_slack_summary_message(
     *,
     media_counts: Mapping[str, int],
     spreadsheet_id: str = DEFAULT_SPREADSHEET_ID,
+    summary_url: str = DEFAULT_SUMMARY_SPREADSHEET_URL,
 ) -> str:
     normalized_counts = _normalize_media_counts(media_counts)
-    spreadsheet_id = str(spreadsheet_id or DEFAULT_SPREADSHEET_ID).strip()
-    url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit"
+    url = str(summary_url or "").strip()
+    if not url:
+        spreadsheet_id = str(spreadsheet_id or DEFAULT_SPREADSHEET_ID).strip()
+        url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit?gid=1211091820#gid=1211091820"
     lines = [
         f"*<{url}|SA / AC 히스토리 자동 적재 완료>* - 수동 변경 내역 기준",
         "",
     ]
     lines.extend(f"{media}: {normalized_counts.get(media, 0)}건" for media in SLACK_MEDIA_ORDER)
     return "\n".join(lines)
+
+
+def count_rows_by_media(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        media = str(row.get("매체", "") or "").strip()
+        if not media:
+            continue
+        counts[media] = counts.get(media, 0) + 1
+    return counts
 
 
 def build_slack_summary_message(

@@ -321,7 +321,7 @@ Slack App에는 최소 `chat:write` 권한이 필요하고, Bot이 `C04JCCUDR1R`
 Slack 메시지 형식:
 
 ```text
-*<https://docs.google.com/spreadsheets/d/1-pcaJCyUc3_DQPuNNZgDvc433Cdo2DbrwFsxLbxv95g/edit|SA / AC 히스토리 자동 적재 완료>* - 수동 변경 내역 기준
+*<https://docs.google.com/spreadsheets/d/1-pcaJCyUc3_DQPuNNZgDvc433Cdo2DbrwFsxLbxv95g/edit?gid=1211091820#gid=1211091820|SA / AC 히스토리 자동 적재 완료>* - 수동 변경 내역 기준
 
 네이버SA: 0건
 구글SA: 0건

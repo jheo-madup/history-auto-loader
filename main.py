@@ -11,7 +11,7 @@ from collectors.google_ads_change import GoogleAdsChangeCollector
 from collectors.meta_change import MetaChangeCollector
 from collectors.naver_sa_change import NaverSAChangeCollector
 from config import settings
-from notifiers.slack_notifier import SlackNotifier
+from notifiers.slack_notifier import SlackNotifier, count_rows_by_media
 from processors.filters import apply_raw_filters
 from processors.google_media_router import route_google_media
 from processors.normalizer import (
@@ -379,7 +379,7 @@ def main() -> int:
         start_at=start_at,
         end_at=end_at,
         summaries=summary_texts,
-        media_counts=raw_stats.get("new_by_media", {}),
+        media_counts=count_rows_by_media(summary_all_rows),
         media_errors=media_errors,
     )
     return 0

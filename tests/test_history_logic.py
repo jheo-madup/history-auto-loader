@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from collectors.auto_bid_sheet_change import build_auto_bid_rows_from_log_records
-from notifiers.slack_notifier import format_slack_summary_message
+from notifiers.slack_notifier import count_rows_by_media, format_slack_summary_message
 from processors.filters import should_keep_raw
 from processors.google_media_router import classify_google_media
 from processors.summarizer import build_summary
@@ -366,11 +366,26 @@ class HistoryLogicTest(unittest.TestCase):
 
         self.assertEqual(
             first_line,
-            "*<https://docs.google.com/spreadsheets/d/1-pcaJCyUc3_DQPuNNZgDvc433Cdo2DbrwFsxLbxv95g/edit|SA / AC 히스토리 자동 적재 완료>* - 수동 변경 내역 기준",
+            "*<https://docs.google.com/spreadsheets/d/1-pcaJCyUc3_DQPuNNZgDvc433Cdo2DbrwFsxLbxv95g/edit?gid=1211091820#gid=1211091820|SA / AC 히스토리 자동 적재 완료>* - 수동 변경 내역 기준",
         )
         self.assertTrue(first_line.startswith("*<https://"))
         self.assertIn("|SA / AC 히스토리 자동 적재 완료>* - 수동 변경 내역 기준", first_line)
         self.assertNotIn("* - 수동 변경 내역 기준*", first_line)
+
+    def test_slack_media_counts_use_final_daily_raw_rows(self) -> None:
+        rows = [
+            _row(media="네이버SA"),
+            _row(media="네이버SA"),
+            _row(media="구글SA"),
+            _row(media="BS - 네이버"),
+            _row(media="네이버 파워컨텐츠"),
+        ]
+        message = format_slack_summary_message(media_counts=count_rows_by_media(rows))
+
+        self.assertIn("네이버SA: 2건", message)
+        self.assertIn("구글SA: 1건", message)
+        self.assertIn("브랜드검색: 1건", message)
+        self.assertIn("네이버 파워컨텐츠: 1건", message)
 
 
 def _row(
