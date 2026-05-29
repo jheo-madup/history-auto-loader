@@ -166,6 +166,12 @@ class Settings:
     )
     AUTO_BID_FALLBACK_MEDIA: str = _env("AUTO_BID_FALLBACK_MEDIA", "네이버SA")
 
+    SLACK_NOTIFICATIONS_ENABLED: bool = _env_bool("SLACK_NOTIFICATIONS_ENABLED", False)
+    SLACK_BOT_TOKEN: str = _env("SLACK_BOT_TOKEN")
+    SLACK_CHANNEL_ID: str = _env("SLACK_CHANNEL_ID", "C04JCCUDR1R")
+    SLACK_MESSAGE_MAX_CHARS: str = _env("SLACK_MESSAGE_MAX_CHARS", "35000")
+    SLACK_API_TIMEOUT_SECONDS: str = _env("SLACK_API_TIMEOUT_SECONDS", "10")
+
     RUN_MODE: str = _env("RUN_MODE", "local")
     ENABLE_GOOGLE_SA: bool = _env_bool("ENABLE_GOOGLE_SA", True)
     ENABLE_NAVER_SA: bool = _env_bool("ENABLE_NAVER_SA", True)

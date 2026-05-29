@@ -47,6 +47,7 @@
 10. 자동입찰시트의 `자동입찰_변경로그` 탭에서 목표순위 변경 로그를 읽어 Raw/요약에 추가합니다.
 11. `row_hash`로 중복을 제거하고 Raw 탭은 최근 7일치만 유지합니다.
 12. Raw 기준으로 일자/매체별 요약을 다시 만들고 요약 탭 셀을 덮어씁니다.
+13. Slack 알림이 활성화되어 있으면 요약 내용을 지정 채널로 발송합니다.
 
 ## 로컬 설정
 
@@ -82,6 +83,10 @@ AUTO_BID_SPREADSHEET_ID=1k4uQxx6n0k1Tv3IB34MQc6i35KAoE6VPzG5Fc1UEMN4
 AUTO_BID_WORKSHEET_GID=2077662868
 AUTO_BID_LOG_WORKSHEET_NAME=자동입찰_변경로그
 AUTO_BID_LOG_LOOKBACK_DAYS=7
+
+SLACK_NOTIFICATIONS_ENABLED=true
+SLACK_CHANNEL_ID=C04JCCUDR1R
+SLACK_BOT_TOKEN=
 ```
 
 Google Sheets 로컬 인증은 아래 중 하나를 사용합니다.
@@ -299,6 +304,20 @@ ISA 목표순위 3순위로 신규 설정
 
 Raw에는 `변경유형=자동입찰 목표순위 변경`, `변경작업=목표순위 변경`, `변경필드=목표순위`, `변경레벨=키워드`로 적재합니다. `row_hash`는 `source=auto_bid_sheet`, 변경일자, 키워드 ID, 키워드, 캠페인명, 광고그룹명, 이전값, 변경값, 변경필드를 기준으로 생성합니다.
 
+## Slack 요약 알림
+
+요약 탭 적재가 정상 완료되면 Slack Bot으로 실행 일자의 매체별 요약을 한 번에 발송할 수 있습니다. 토큰은 코드나 GitHub에 올리지 말고 Secret Manager 또는 Cloud Run Secret env로만 주입합니다.
+
+```env
+SLACK_NOTIFICATIONS_ENABLED=true
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_CHANNEL_ID=C04JCCUDR1R
+SLACK_MESSAGE_MAX_CHARS=35000
+SLACK_API_TIMEOUT_SECONDS=10
+```
+
+Slack App에는 최소 `chat:write` 권한이 필요하고, Bot이 `C04JCCUDR1R` 채널에 초대되어 있어야 합니다. 토큰이 없거나 채널 ID가 비어 있으면 자동화는 실패하지 않고 Slack 발송만 건너뜁니다.
+
 ## 메타 로그인 세션
 
 메타는 변경 이력 화면에서 xlsx/csv를 다운로드하는 Playwright 하네스로 동작합니다. 먼저 `.env`에 변경 이력 화면 URL을 넣고 활성화합니다.
@@ -358,6 +377,13 @@ gcloud secrets create google-ads-storage-state --replication-policy=automatic --
 gcloud secrets versions add google-ads-storage-state --data-file=./secrets/google_ads_storage_state.json --project=madup-samsungsec
 ```
 
+Slack Bot token:
+
+```bash
+gcloud secrets create slack-bot-token --replication-policy=automatic --project=madup-samsungsec
+printf '%s' 'xoxb-...' | gcloud secrets versions add slack-bot-token --data-file=- --project=madup-samsungsec
+```
+
 Secret 접근 권한:
 
 ```bash
@@ -375,6 +401,11 @@ gcloud secrets add-iam-policy-binding google-ads-storage-state \
   --project=madup-samsungsec \
   --member="serviceAccount:mkt14-automation-runner@madup-samsungsec.iam.gserviceaccount.com" \
   --role="roles/secretmanager.secretAccessor"
+
+gcloud secrets add-iam-policy-binding slack-bot-token \
+  --project=madup-samsungsec \
+  --member="serviceAccount:mkt14-automation-runner@madup-samsungsec.iam.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
 ```
 
 Cloud Run Job에는 Secret payload를 환경변수로 주입하는 방식을 권장합니다.
@@ -382,6 +413,7 @@ Cloud Run Job에는 Secret payload를 환경변수로 주입하는 방식을 권
 - `GOOGLE_ADS_YAML_CONTENT=google-ads-yaml:latest`
 - `GOOGLE_ADS_STORAGE_STATE_JSON=google-ads-storage-state:latest`
 - `NAVER_STORAGE_STATE_JSON=naver-storage-state:latest`
+- `SLACK_BOT_TOKEN=slack-bot-token:latest`
 
 대안으로 런타임에서 직접 Secret Manager/GCS를 읽도록 `GOOGLE_ADS_CONFIG_SECRET_ID`, `GOOGLE_ADS_STORAGE_STATE_SECRET_ID`, `NAVER_STORAGE_STATE_SECRET_ID`, `GOOGLE_ADS_CONFIG_GCS_URI`, `GOOGLE_ADS_STORAGE_STATE_GCS_URI`, `NAVER_STORAGE_STATE_GCS_URI`를 사용할 수 있습니다.
 
@@ -422,8 +454,8 @@ gcloud run jobs create ${JOB_NAME} \
   --memory=2Gi \
   --cpu=2 \
   --task-timeout=1800 \
-  --set-env-vars=RUN_MODE=cloudrun,PROJECT_ID=${PROJECT_ID},REGION=${REGION},TIMEZONE=Asia/Seoul,SPREADSHEET_ID=1-pcaJCyUc3_DQPuNNZgDvc433Cdo2DbrwFsxLbxv95g,RAW_WORKSHEET_NAME=히스토리자동화_Raw,SUMMARY_WORKSHEET_NAME=SA_히스토리적재_자동화,GOOGLE_SA_COLLECTION_MODE=browser,GOOGLE_ADS_CUSTOMER_ID=YOUR_CUSTOMER_ID,GOOGLE_ADS_LOGIN_CUSTOMER_ID=YOUR_LOGIN_CUSTOMER_ID,GOOGLE_ADS_HISTORY_URL=https://ads.google.com/aw/changehistory,NAVER_HISTORY_URL=YOUR_NAVER_HISTORY_URL,AD_INDEX_AD_GROUP_COLUMN="Ad Group",AUTO_BID_SHEET_ENABLED=true,AUTO_BID_SPREADSHEET_ID=1k4uQxx6n0k1Tv3IB34MQc6i35KAoE6VPzG5Fc1UEMN4,AUTO_BID_WORKSHEET_GID=2077662868,AUTO_BID_LOG_WORKSHEET_NAME=자동입찰_변경로그,AUTO_BID_LOG_LOOKBACK_DAYS=7 \
-  --set-secrets=GOOGLE_ADS_YAML_CONTENT=google-ads-yaml:latest,GOOGLE_ADS_STORAGE_STATE_JSON=google-ads-storage-state:latest,NAVER_STORAGE_STATE_JSON=naver-storage-state:latest
+  --set-env-vars=RUN_MODE=cloudrun,PROJECT_ID=${PROJECT_ID},REGION=${REGION},TIMEZONE=Asia/Seoul,SPREADSHEET_ID=1-pcaJCyUc3_DQPuNNZgDvc433Cdo2DbrwFsxLbxv95g,RAW_WORKSHEET_NAME=히스토리자동화_Raw,SUMMARY_WORKSHEET_NAME=SA_히스토리적재_자동화,GOOGLE_SA_COLLECTION_MODE=browser,GOOGLE_ADS_CUSTOMER_ID=YOUR_CUSTOMER_ID,GOOGLE_ADS_LOGIN_CUSTOMER_ID=YOUR_LOGIN_CUSTOMER_ID,GOOGLE_ADS_HISTORY_URL=https://ads.google.com/aw/changehistory,NAVER_HISTORY_URL=YOUR_NAVER_HISTORY_URL,AD_INDEX_AD_GROUP_COLUMN="Ad Group",AUTO_BID_SHEET_ENABLED=true,AUTO_BID_SPREADSHEET_ID=1k4uQxx6n0k1Tv3IB34MQc6i35KAoE6VPzG5Fc1UEMN4,AUTO_BID_WORKSHEET_GID=2077662868,AUTO_BID_LOG_WORKSHEET_NAME=자동입찰_변경로그,AUTO_BID_LOG_LOOKBACK_DAYS=7,SLACK_NOTIFICATIONS_ENABLED=true,SLACK_CHANNEL_ID=C04JCCUDR1R \
+  --set-secrets=GOOGLE_ADS_YAML_CONTENT=google-ads-yaml:latest,GOOGLE_ADS_STORAGE_STATE_JSON=google-ads-storage-state:latest,NAVER_STORAGE_STATE_JSON=naver-storage-state:latest,SLACK_BOT_TOKEN=slack-bot-token:latest
 ```
 
 수동 실행:

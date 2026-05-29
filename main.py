@@ -11,6 +11,7 @@ from collectors.google_ads_change import GoogleAdsChangeCollector
 from collectors.meta_change import MetaChangeCollector
 from collectors.naver_sa_change import NaverSAChangeCollector
 from config import settings
+from notifiers.slack_notifier import SlackNotifier
 from processors.filters import apply_raw_filters
 from processors.google_media_router import route_google_media
 from processors.normalizer import (
@@ -335,6 +336,7 @@ def main() -> int:
             summary_failed = True
             LOGGER.exception("Summary 매체 컬럼 준비 실패: %s", exc)
 
+    summary_texts: dict[str, str] = {}
     for media in sorted(summary_media_names):
         try:
             if raw_write_failed:
@@ -358,6 +360,7 @@ def main() -> int:
                 media=media,
                 summary_text=summary_text,
             )
+            summary_texts[media] = summary_text
             LOGGER.info(
                 "%s 요약 업데이트 완료: %s",
                 media,
@@ -371,6 +374,13 @@ def main() -> int:
         LOGGER.warning("일부 매체 수집 실패: %s", media_errors)
     if raw_write_failed or summary_failed:
         return 1
+    SlackNotifier(settings=settings, logger=get_logger("slack")).send_summary(
+        date_text=run_date,
+        start_at=start_at,
+        end_at=end_at,
+        summaries=summary_texts,
+        media_errors=media_errors,
+    )
     return 0
 
 

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from collectors.auto_bid_sheet_change import build_auto_bid_rows_from_log_records
+from notifiers.slack_notifier import build_slack_summary_message
 from processors.filters import should_keep_raw
 from processors.google_media_router import classify_google_media
 from processors.summarizer import build_summary
@@ -321,6 +322,26 @@ class HistoryLogicTest(unittest.TestCase):
 
         self.assertEqual(len(recent), 7)
         self.assertEqual(recent[-1]["일자"], "2026-05-23")
+
+    def test_slack_summary_message_contains_media_summaries(self) -> None:
+        now = datetime(2026, 5, 29, 12, 0, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+        message = build_slack_summary_message(
+            date_text="2026-05-29",
+            start_at=now.replace(hour=0),
+            end_at=now,
+            summaries={
+                "구글AC": "[gg_all_web_all_non_non_ao-success_pmax_2604] 소재 OFF 1건",
+                "네이버SA": "",
+            },
+            media_errors={"네이버SA": "테스트 오류"},
+        )
+
+        self.assertIn("*SA 변경기록 요약* `2026-05-29`", message)
+        self.assertIn("*구글AC*", message)
+        self.assertIn("[gg_all_web_all_non_non_ao-success_pmax_2604] 소재 OFF 1건", message)
+        self.assertIn("*네이버SA*", message)
+        self.assertIn("변경사항 없음", message)
+        self.assertIn("*수집 오류*", message)
 
 
 def _row(
