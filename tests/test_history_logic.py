@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from collectors.auto_bid_sheet_change import build_auto_bid_rows_from_log_records
-from notifiers.slack_notifier import build_slack_summary_message
+from notifiers.slack_notifier import format_slack_summary_message
 from processors.filters import should_keep_raw
 from processors.google_media_router import classify_google_media
 from processors.summarizer import build_summary
@@ -323,25 +323,51 @@ class HistoryLogicTest(unittest.TestCase):
         self.assertEqual(len(recent), 7)
         self.assertEqual(recent[-1]["일자"], "2026-05-23")
 
-    def test_slack_summary_message_contains_media_summaries(self) -> None:
-        now = datetime(2026, 5, 29, 12, 0, 0, tzinfo=ZoneInfo("Asia/Seoul"))
-        message = build_slack_summary_message(
-            date_text="2026-05-29",
-            start_at=now.replace(hour=0),
-            end_at=now,
-            summaries={
-                "구글AC": "[gg_all_web_all_non_non_ao-success_pmax_2604] 소재 OFF 1건",
-                "네이버SA": "",
-            },
-            media_errors={"네이버SA": "테스트 오류"},
+    def test_slack_summary_message_replaces_media_counts(self) -> None:
+        message = format_slack_summary_message(
+            media_counts={
+                "네이버SA": 12,
+                "구글SA": 5,
+                "구글AC": 1,
+                "네이버SA_파워콘텐츠": 3,
+            }
         )
 
-        self.assertIn("*SA 변경기록 요약* `2026-05-29`", message)
-        self.assertIn("*구글AC*", message)
-        self.assertIn("[gg_all_web_all_non_non_ao-success_pmax_2604] 소재 OFF 1건", message)
-        self.assertIn("*네이버SA*", message)
-        self.assertIn("변경사항 없음", message)
-        self.assertIn("*수집 오류*", message)
+        self.assertIn("네이버SA: 12건", message)
+        self.assertIn("구글SA: 5건", message)
+        self.assertIn("구글AC: 1건", message)
+        self.assertIn("네이버 파워컨텐츠: 3건", message)
+
+    def test_slack_summary_message_keeps_zero_count_media_lines(self) -> None:
+        message = format_slack_summary_message(media_counts={"네이버SA": 2})
+
+        self.assertIn("네이버SA: 2건", message)
+        self.assertIn("구글SA: 0건", message)
+        self.assertIn("구글AC: 0건", message)
+        self.assertIn("네이버 파워컨텐츠: 0건", message)
+
+    def test_slack_summary_message_has_no_auto_bid_separate_line(self) -> None:
+        message = format_slack_summary_message(
+            media_counts={
+                "네이버SA": 2,
+                "자동입찰 목표순위 변경": 99,
+            }
+        )
+
+        self.assertIn("네이버SA: 2건", message)
+        self.assertNotIn("자동입찰", message)
+
+    def test_slack_summary_message_keeps_mrkdwn_link_format(self) -> None:
+        message = format_slack_summary_message(media_counts={})
+        first_line = message.splitlines()[0]
+
+        self.assertEqual(
+            first_line,
+            "*<https://docs.google.com/spreadsheets/d/1-pcaJCyUc3_DQPuNNZgDvc433Cdo2DbrwFsxLbxv95g/edit|SA / AC 히스토리 자동 적재 완료>* - 수동 변경 내역 기준",
+        )
+        self.assertTrue(first_line.startswith("*<https://"))
+        self.assertIn("|SA / AC 히스토리 자동 적재 완료>* - 수동 변경 내역 기준", first_line)
+        self.assertNotIn("* - 수동 변경 내역 기준*", first_line)
 
 
 def _row(

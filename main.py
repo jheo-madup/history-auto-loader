@@ -379,6 +379,7 @@ def main() -> int:
         start_at=start_at,
         end_at=end_at,
         summaries=summary_texts,
+        media_counts=raw_stats.get("new_by_media", {}),
         media_errors=media_errors,
     )
     return 0

@@ -97,7 +97,7 @@ class SheetWriter:
         collected_at: datetime,
         timezone_name: str,
         days: int = 7,
-    ) -> dict[str, int]:
+    ) -> dict[str, Any]:
         worksheet = self._worksheet(self.settings.RAW_WORKSHEET_NAME)
         self._ensure_raw_header(worksheet)
         try:
@@ -119,12 +119,13 @@ class SheetWriter:
                 for row in rows
                 if str(row.get("row_hash", "")).strip()
             ]
-            new_rows = [
+            new_candidates = [
                 row
                 for row in incoming_rows
                 if str(row.get("row_hash", "")).strip() not in existing_hashes
                 and _raw_dedupe_key(row) not in existing_semantic_keys
             ]
+            new_rows = dedupe_raw_records(new_candidates)
             merged_rows = dedupe_raw_records(
                 [_raw_record(record) for record in recent_existing] + incoming_rows
             )
@@ -141,6 +142,7 @@ class SheetWriter:
                 "retained_existing": len(recent_existing),
                 "pruned": len(existing_records) - len(recent_existing),
                 "final": len(merged_rows),
+                "new_by_media": _count_by_media(new_rows),
             }
         except APIError as exc:
             raise SheetWriterError(f"Raw 최근 7일 merge 실패: {exc}") from exc
@@ -404,6 +406,16 @@ def _raw_dedupe_key(row: dict[str, Any]) -> tuple[str, ...]:
 def _media_specificity(row: dict[str, Any]) -> int:
     media = str(row.get("매체", "")).strip()
     return 0 if media in {"", "네이버SA", "구글SA", "구글AC"} else 10
+
+
+def _count_by_media(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        media = str(row.get("매체", "") or "").strip()
+        if not media:
+            continue
+        counts[media] = counts.get(media, 0) + 1
+    return counts
 
 
 def _contiguous_ranges(numbers: list[int]) -> list[tuple[int, int]]:
