@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -112,13 +113,21 @@ class SheetWriter:
                 for record in recent_existing
                 if str(record.get("row_hash", "")).strip()
             }
-            new_rows = [
+            existing_semantic_keys = {_raw_dedupe_key(_raw_record(record)) for record in recent_existing}
+            incoming_rows = [
                 _raw_record(row)
                 for row in rows
                 if str(row.get("row_hash", "")).strip()
-                and str(row.get("row_hash", "")).strip() not in existing_hashes
             ]
-            merged_rows = [_raw_record(record) for record in recent_existing] + new_rows
+            new_rows = [
+                row
+                for row in incoming_rows
+                if str(row.get("row_hash", "")).strip() not in existing_hashes
+                and _raw_dedupe_key(row) not in existing_semantic_keys
+            ]
+            merged_rows = dedupe_raw_records(
+                [_raw_record(record) for record in recent_existing] + incoming_rows
+            )
             values = [RAW_COLUMNS] + [
                 [row.get(column, "") for column in RAW_COLUMNS] for row in merged_rows
             ]
@@ -358,6 +367,43 @@ def _record_date(record: dict[str, Any], timezone_name: str):
 
 def _raw_record(row: dict[str, Any]) -> dict[str, Any]:
     return {column: row.get(column, "") for column in RAW_COLUMNS}
+
+
+def dedupe_raw_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: OrderedDict[tuple[str, ...], dict[str, Any]] = OrderedDict()
+    scores: dict[tuple[str, ...], tuple[int, int]] = {}
+    for index, record in enumerate(records):
+        key = _raw_dedupe_key(record)
+        score = (_media_specificity(record), index)
+        if key not in deduped or score >= scores[key]:
+            deduped[key] = record
+            scores[key] = score
+    return list(deduped.values())
+
+
+def _raw_dedupe_key(row: dict[str, Any]) -> tuple[str, ...]:
+    fields = (
+        "변경일시",
+        "변경자",
+        "캠페인명",
+        "광고그룹명",
+        "소재명",
+        "키워드명",
+        "변경레벨",
+        "변경유형",
+        "변경작업",
+        "변경필드",
+        "이전값",
+        "변경값",
+        "변경내용",
+        "원본리소스명",
+    )
+    return tuple(str(row.get(field, "") or "").strip().replace("\r\n", "\n") for field in fields)
+
+
+def _media_specificity(row: dict[str, Any]) -> int:
+    media = str(row.get("매체", "")).strip()
+    return 0 if media in {"", "네이버SA", "구글SA", "구글AC"} else 10
 
 
 def _contiguous_ranges(numbers: list[int]) -> list[tuple[int, int]]:

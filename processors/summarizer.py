@@ -20,7 +20,7 @@ VALUE_SENSITIVE_LABELS = (
 )
 VALUE_SENSITIVE_LABEL_PREFIXES = ("콘텐츠 매체 전용입찰가",)
 ALWAYS_COUNT_LABEL_PREFIXES = ("소재 ON", "소재 OFF")
-MAX_SUMMARY_LINES = 10
+MAX_SUMMARY_LINES = 30
 AUTO_BID_CHANGE_TYPE = "자동입찰 목표순위 변경"
 
 
@@ -68,7 +68,7 @@ def build_summary(rows: list[dict[str, Any]], media: str) -> str:
                 "count": 0,
                 "row": row,
             }
-        grouped[key]["count"] += 1
+        grouped[key]["count"] += _event_count_for_label(row, label)
 
     lines: list[str] = [line for _, line in sorted(aggregate_lines, key=lambda item: item[0])]
     for item in sorted(grouped.values(), key=lambda value: value["priority"]):
@@ -80,7 +80,7 @@ def build_summary(rows: list[dict[str, Any]], media: str) -> str:
 
 
 def _classify(row: dict[str, Any]) -> tuple[int, str] | None:
-    text = _row_text(row)
+    change_text = _classification_text(row)
     if str(row.get("변경유형", "")).strip() == AUTO_BID_CHANGE_TYPE:
         return 3, AUTO_BID_CHANGE_TYPE
     if is_new_daily_budget_setting(row):
@@ -88,12 +88,12 @@ def _classify(row: dict[str, Any]) -> tuple[int, str] | None:
     if is_content_media_bid_setting_change(row):
         status = _content_media_bid_status(row)
         return 3, f"콘텐츠 매체 전용입찰가 {status}" if status else "콘텐츠 매체 전용입찰가 변경"
-    if _contains_any(text, ("budget", "일예산", "예산")) and not _contains_any(
-        text, ("bidding_strategy", "입찰전략", "tcpa", "입찰가", "bid")
+    if _contains_any(change_text, ("budget", "일예산", "예산")) and not _contains_any(
+        change_text, ("bidding_strategy", "입찰전략", "tcpa", "입찰가", "bid")
     ):
         return None
-    if _contains_any(text, ("name", "이름", "명칭")) and not _contains_any(
-        text,
+    if _contains_any(change_text, ("name", "이름", "명칭")) and not _contains_any(
+        change_text,
         (
             "keyword",
             "키워드",
@@ -114,30 +114,30 @@ def _classify(row: dict[str, Any]) -> tuple[int, str] | None:
     ):
         return None
 
-    if _contains_any(text, ("bidding_strategy", "입찰전략", "bid strategy")):
+    if _contains_any(change_text, ("bidding_strategy", "입찰전략", "bid strategy")):
         return 1, "입찰전략 변경"
-    if _contains_any(text, ("target_cpa", "tcpa", "타겟 cpa", "목표 cpa", "목표값")):
-        return 2, "tCPA/목표값 변경"
-    if _contains_any(text, ("seasonality", "시즌성", "시즌성 조정", "전환율 조정")):
+    if _contains_any(change_text, ("seasonality", "시즌성", "시즌성 조정", "전환율 조정")):
         return 2, "시즌성 조정"
-    if _is_bid_change(row, text):
+    if _is_bid_change(row, change_text):
         return 3, "입찰가 변경"
-    if _is_keyword_change(row, text):
+    if _is_keyword_change(row, change_text):
         return 4, "키워드 추가/제외"
     asset_status = _asset_status(row)
-    if asset_status and _is_asset_change(row, text):
+    if asset_status and _is_asset_change(row, change_text):
         return 5, f"소재 {asset_status}"
-    if _is_asset_change(row, text):
+    if _is_asset_change(row, change_text):
         return 5, "소재 추가/중지/교체"
-    if _contains_any(text, ("final_url", "final_urls", "tracking_url", "랜딩", "url")):
+    if _is_target_cpa_change(row):
+        return 2, "tCPA/목표값 변경"
+    if _contains_any(change_text, ("final_url", "final_urls", "tracking_url", "랜딩", "url")):
         return 6, "랜딩 URL 변경"
-    if _is_excluded_data_segment_change(text):
+    if _is_excluded_data_segment_change(change_text):
         return 7, "제외 데이터 세그먼트 추가"
-    if _is_campaign_status_change(row, text):
+    if _is_campaign_status_change(row, change_text):
         return 8, "캠페인 ON/OFF"
-    if _is_ad_group_status_change(row, text):
+    if _is_ad_group_status_change(row, change_text):
         return 9, "광고그룹 ON/OFF"
-    if _contains_any(text, ("create", "remove", "생성", "삭제", "구조", "실험 상태")):
+    if _contains_any(change_text, ("create", "remove", "생성", "삭제", "구조", "실험 상태")):
         return 10, "캠페인/그룹 구조 변경"
     return None
 
@@ -218,7 +218,7 @@ def _clean_segment_name(value: str) -> str:
 
 
 def _target_value_suffix(row: dict[str, Any]) -> str:
-    text = _row_text(row)
+    text = _classification_text(row)
     if not _contains_any(text, ("target_cpa", "tcpa", "타겟 cpa", "목표 cpa", "목표값")):
         return ""
 
@@ -291,7 +291,18 @@ def _is_asset_change(row: dict[str, Any], text: str) -> bool:
     level = str(row.get("변경레벨", "")).lower()
     return _contains_any(
         " ".join((field, change_type, level, text.lower())),
-        ("ad_group_ad", "creative", "asset", "소재", "애셋", "이미지", "동영상"),
+        (
+            "ad_group_ad",
+            "creative",
+            "asset",
+            "소재",
+            "애셋",
+            "이미지",
+            "동영상",
+            "반응형 검색 광고",
+            "검색 광고",
+            "responsive search ad",
+        ),
     )
 
 
@@ -299,8 +310,8 @@ def _asset_status(row: dict[str, Any]) -> str:
     change_type = str(row.get("변경유형", "")).lower()
     operation = str(row.get("변경작업", "")).lower()
     if "on/off" not in f"{change_type} {operation}":
-        return ""
-    return _changed_on_off_status(row)
+        return _changed_status(row)
+    return _changed_on_off_status(row) or _changed_status(row)
 
 
 def _asset_aggregate_lines(
@@ -316,10 +327,11 @@ def _asset_aggregate_lines(
     lines: list[tuple[int, str]] = []
     aggregate_indexes: set[int] = set()
     for (entity, action, sort_key), indexes in grouped.items():
-        if len(indexes) < 3:
+        total_count = sum(_event_count_for_label(candidates[index][2], candidates[index][1]) for index in indexes)
+        if total_count < 3:
             continue
         aggregate_indexes.update(indexes)
-        lines.append((5, f"[{entity}] 소재 {len(indexes)}건 {action}"))
+        lines.append((5, f"[{entity}] 소재 {total_count}건 {action}"))
     return lines, aggregate_indexes
 
 
@@ -328,7 +340,10 @@ def _asset_aggregate_key(label: str, row: dict[str, Any]) -> tuple[str, str, str
         return None
     level = str(row.get("변경레벨", "")).lower()
     change_type = str(row.get("변경유형", "")).lower()
-    if not _contains_any(f"{level} {change_type}", ("소재", "ad_group_ad", "creative", "asset")):
+    if not _contains_any(
+        f"{level} {change_type}",
+        ("소재", "ad_group_ad", "creative", "asset", "반응형 검색 광고", "검색 광고"),
+    ):
         return None
 
     ad_group = str(row.get("광고그룹명", "")).strip()
@@ -385,6 +400,40 @@ def _changed_usage_values(row: dict[str, Any], label: str) -> tuple[str, str]:
 def _changed_on_off_status(row: dict[str, Any]) -> str:
     match = re.search(r"변경\s*후\s*On/Off\s*:\s*(ON|OFF)", _row_text(row), re.I | re.S)
     return match.group(1).upper() if match else ""
+
+
+def _changed_status(row: dict[str, Any]) -> str:
+    text = _classification_text(row).lower()
+    if re.search(r"(?:에서|->|→)\s*(?:일시\s*중지|일시중지|중지|paused|off)", text):
+        return "OFF"
+    if re.search(r"(?:변경\s*후|after)[^\n]*(?:일시\s*중지|일시중지|중지|paused|off)", text):
+        return "OFF"
+    if re.search(r"(?:에서|->|→)\s*(?:운영중|운영\s*중|활성|enabled|on)", text):
+        return "ON"
+    if re.search(r"(?:변경\s*후|after)[^\n]*(?:운영중|운영\s*중|활성|enabled|on)", text):
+        return "ON"
+    return ""
+
+
+def _is_target_cpa_change(row: dict[str, Any]) -> bool:
+    return _contains_any(_classification_text(row), ("target_cpa", "tcpa", "타겟 cpa", "목표 cpa", "목표값"))
+
+
+def _event_count_for_label(row: dict[str, Any], label: str) -> int:
+    if label.startswith("소재 "):
+        return _asset_event_count(row)
+    return 1
+
+
+def _asset_event_count(row: dict[str, Any]) -> int:
+    text = str(row.get("변경내용", "") or row.get("raw_text", "") or "")
+    matches = re.findall(
+        r"(?:반응형\s*검색\s*광고|검색\s*광고|소재|광고)\s*(\d+)\s*개(?:가|이)?\s*변경",
+        text,
+        re.I,
+    )
+    total = sum(int(match) for match in matches if match.isdigit())
+    return max(1, total)
 
 
 def _auto_bid_line(row: dict[str, Any]) -> str:
@@ -507,3 +556,17 @@ def _row_text(row: dict[str, Any]) -> str:
         row.get("raw_text", ""),
     ]
     return " ".join(str(value) for value in values if value is not None)
+
+
+def _classification_text(row: dict[str, Any]) -> str:
+    return _strip_entity_names(row, _row_text(row))
+
+
+def _strip_entity_names(row: dict[str, Any], text: str) -> str:
+    stripped = str(text or "")
+    for key in ("캠페인명", "광고그룹명", "소재명", "키워드명"):
+        value = str(row.get(key, "") or "").strip()
+        if len(value) < 2:
+            continue
+        stripped = re.sub(re.escape(value), " ", stripped, flags=re.I)
+    return stripped

@@ -5,7 +5,6 @@ from typing import Any
 
 
 HASH_FIELDS = [
-    "매체",
     "변경일시",
     "변경자",
     "캠페인명",

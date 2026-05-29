@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Any
@@ -77,7 +78,7 @@ class CampaignMediaIndex:
             media = self.ad_group_to_media.get(key)
             if media:
                 return media
-        return ""
+        return _infer_media_from_names(campaign=campaign, ad_group=ad_group)
 
     def summary_entity_for(self, campaign: str, ad_group: str = "") -> str:
         summary_entity = self.campaign_to_summary_entity.get(_normalize_campaign(campaign), "")
@@ -250,6 +251,19 @@ def _normalize_ad_group_keys(value: str) -> tuple[str, ...]:
 def _normalize_media(value: str) -> str:
     media = str(value or "").strip()
     return MEDIA_ALIASES.get(media, media)
+
+
+def _infer_media_from_names(campaign: str, ad_group: str) -> str:
+    campaign_text = str(campaign or "").strip().lower()
+    ad_group_text = str(ad_group or "").strip().lower()
+    if "브랜드검색" in campaign_text or "brand search" in campaign_text:
+        return "BS - 네이버"
+    if re.match(r"^\d{4}_", ad_group_text) and any(
+        marker in ad_group_text
+        for marker in ("ml-listing", "pl-normal", "pp-image", "brand", "브랜드")
+    ):
+        return "BS - 네이버"
+    return ""
 
 
 def _normalize_summary_entity(value: str) -> str:

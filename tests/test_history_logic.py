@@ -7,8 +7,9 @@ from zoneinfo import ZoneInfo
 from collectors.auto_bid_sheet_change import build_auto_bid_change_rows
 from processors.filters import should_keep_raw
 from processors.summarizer import build_summary
+from utils.hash_utils import build_row_hash
 from writers.ad_index_reader import CampaignMediaIndex
-from writers.sheet_writer import filter_recent_raw_records
+from writers.sheet_writer import dedupe_raw_records, filter_recent_raw_records
 
 
 class HistoryLogicTest(unittest.TestCase):
@@ -21,6 +22,19 @@ class HistoryLogicTest(unittest.TestCase):
 
         self.assertFalse(should_keep_raw(row))
         self.assertEqual(build_summary([row], "네이버SA"), "")
+
+    def test_budget_change_with_tcpa_campaign_name_is_excluded(self) -> None:
+        row = _row(
+            media="구글SA",
+            campaign="gmo_논브랜드_tCPA_onlyAPP",
+            ad_group="",
+            change_type="예산 1개가 감소함",
+            field="예산",
+            content="예산 1개가 감소함\n  gmo_논브랜드_tCPA_onlyAPP: 예산 금액이(가) ₩1,200,000에서 ₩550,000(으)로 변경됨",
+        )
+
+        self.assertFalse(should_keep_raw(row))
+        self.assertEqual(build_summary([row], "구글SA"), "")
 
     def test_new_daily_budget_setting_is_kept_and_summarized(self) -> None:
         row = _row(
@@ -60,6 +74,21 @@ class HistoryLogicTest(unittest.TestCase):
         self.assertEqual(routed[0]["매체"], "구글SA")
         self.assertEqual(routed[1]["매체"], "네이버 파워컨텐츠")
 
+    def test_brand_search_fallback_routes_to_bs_naver(self) -> None:
+        index = CampaignMediaIndex(
+            campaign_to_media={},
+            ad_group_to_media={},
+            campaign_to_summary_entity={},
+            ad_group_to_summary_entity={},
+            summary_entity_media="메타",
+        )
+
+        routed = index.route_rows(
+            [{"캠페인명": "브랜드검색", "광고그룹명": "2508_금융상품_ml-listing", "매체": "네이버SA"}]
+        )
+
+        self.assertEqual(routed[0]["매체"], "BS - 네이버")
+
     def test_auto_bid_target_rank_change_is_raw_and_summary(self) -> None:
         now = datetime(2026, 5, 29, 13, 0, 0, tzinfo=ZoneInfo("Asia/Seoul"))
         rows = build_auto_bid_change_rows(
@@ -91,6 +120,35 @@ class HistoryLogicTest(unittest.TestCase):
         ]
 
         self.assertEqual(build_summary(rows, "네이버SA"), "[그룹A] 소재 5건 변경")
+
+    def test_google_responsive_search_ad_off_is_not_tcpa_change(self) -> None:
+        row = _row(
+            media="구글SA",
+            campaign="gmo_논브랜드_tCPA_onlyAPP",
+            ad_group="m_국내_일반",
+            change_type="반응형 검색 광고 1개가 변경됨",
+            field="",
+            content="반응형 검색 광고 1개가 변경됨\n  상태이(가) 운영중에서 일시중지됨(으)로 변경됨",
+        )
+        row["raw_text"] = '{"캠페인":"gmo_논브랜드_tCPA_onlyAPP","변경사항":"반응형 검색 광고 1개가 변경됨"}'
+
+        self.assertTrue(should_keep_raw(row))
+        self.assertEqual(build_summary([row], "구글SA"), "[m_국내_일반] 소재 OFF 1건")
+
+    def test_row_hash_ignores_media_after_index_routing(self) -> None:
+        naver_row = _row(campaign="브랜드검색", ad_group="2508_금융상품_ml-listing", media="네이버SA")
+        bs_row = {**naver_row, "매체": "BS - 네이버"}
+
+        self.assertEqual(build_row_hash(naver_row), build_row_hash(bs_row))
+
+    def test_raw_dedupe_prefers_specific_media(self) -> None:
+        naver_row = _row(campaign="브랜드검색", ad_group="2508_금융상품_ml-listing", media="네이버SA")
+        bs_row = {**naver_row, "매체": "BS - 네이버"}
+
+        deduped = dedupe_raw_records([naver_row, bs_row])
+
+        self.assertEqual(len(deduped), 1)
+        self.assertEqual(deduped[0]["매체"], "BS - 네이버")
 
     def test_raw_keeps_only_recent_seven_days(self) -> None:
         now = datetime(2026, 5, 29, 12, 0, 0, tzinfo=ZoneInfo("Asia/Seoul"))

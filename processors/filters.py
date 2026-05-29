@@ -186,20 +186,21 @@ def daily_budget_values(row: dict[str, Any]) -> tuple[str, str]:
 def _is_budget_only(row: dict[str, Any], text: str) -> bool:
     field = str(row.get("변경필드", "")).lower()
     change_type = str(row.get("변경유형", "")).lower()
+    change_text = _strip_entity_names(row, text)
     if "campaign_budget" in change_type:
         return True
-    if not _contains_any(text, BUDGET_KEYWORDS):
+    if not _contains_any(change_text, BUDGET_KEYWORDS):
         return False
 
     # 입찰전략 필드명에는 bid가 들어갈 수 있어 budget 단독 변경만 제외한다.
     impact_without_budget = tuple(
         keyword for keyword in IMPACT_KEYWORDS if keyword not in {"bid", "status", "on", "off"}
     )
-    if _contains_any(text.replace("budget", ""), impact_without_budget):
+    if _contains_any(change_text.replace("budget", ""), impact_without_budget):
         return False
 
     budget_field_markers = ("budget", "일예산", "예산", "amount_micros")
-    return _contains_any(field, budget_field_markers) or _contains_any(text, BUDGET_KEYWORDS)
+    return _contains_any(field, budget_field_markers) or _contains_any(change_text, BUDGET_KEYWORDS)
 
 
 def _is_name_only(row: dict[str, Any], text: str) -> bool:
@@ -238,6 +239,16 @@ def _row_text(row: dict[str, Any]) -> str:
         row.get("raw_text", ""),
     ]
     return " ".join(str(value) for value in values if value is not None)
+
+
+def _strip_entity_names(row: dict[str, Any], text: str) -> str:
+    stripped = str(text or "")
+    for key in ("캠페인명", "광고그룹명", "소재명", "키워드명"):
+        value = str(row.get(key, "") or "").strip()
+        if len(value) < 2:
+            continue
+        stripped = re.sub(re.escape(value), " ", stripped, flags=re.I)
+    return stripped
 
 
 def _change_blocks(text: str) -> tuple[str, str]:
