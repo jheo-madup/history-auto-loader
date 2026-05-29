@@ -125,12 +125,27 @@ class Settings:
         "AD_INDEX_SPREADSHEET_ID", "12w86uqNNzzHjR0ycsNTPuJZ0VH6a8VL9ky2Cm6WwDGg"
     )
     AD_INDEX_WORKSHEET_NAME: str = _env("AD_INDEX_WORKSHEET_NAME", "광고 인덱스")
+    AD_INDEX_WORKSHEET_GID: str = _env("AD_INDEX_WORKSHEET_GID", "2063584549")
     AD_INDEX_HEADER_ROW: str = _env("AD_INDEX_HEADER_ROW", "5")
     AD_INDEX_CAMPAIGN_COLUMN: str = _env("AD_INDEX_CAMPAIGN_COLUMN", "Campaign")
     AD_INDEX_AD_GROUP_COLUMN: str = _env("AD_INDEX_AD_GROUP_COLUMN", "Ad Group")
     AD_INDEX_MEDIA_COLUMN: str = _env("AD_INDEX_MEDIA_COLUMN", "rd[dim_media]")
     AD_INDEX_SUMMARY_COLUMN: str = _env("AD_INDEX_SUMMARY_COLUMN", "rd[dim_cat1_campaign]")
     AD_INDEX_SUMMARY_ENTITY_MEDIA: str = _env("AD_INDEX_SUMMARY_ENTITY_MEDIA", "메타")
+    AD_INDEX_EXTRA_WORKSHEET_NAMES: str = _env(
+        "AD_INDEX_EXTRA_WORKSHEET_NAMES",
+        "[DA] URL 생성;[BS, 신제품검색] URL 생성;[SA,파컨] URL 생성",
+    )
+    AD_INDEX_EXTRA_HEADER_ROW: str = _env("AD_INDEX_EXTRA_HEADER_ROW", "7")
+    AD_INDEX_EXTRA_CAMPAIGN_COLUMNS: str = _env(
+        "AD_INDEX_EXTRA_CAMPAIGN_COLUMNS", "캠페인 (Campaign);캠페인명;Campaign"
+    )
+    AD_INDEX_EXTRA_AD_GROUP_COLUMNS: str = _env(
+        "AD_INDEX_EXTRA_AD_GROUP_COLUMNS", "그룹 (Ad Group);그룹명;Ad Group"
+    )
+    AD_INDEX_EXTRA_MEDIA_COLUMNS: str = _env(
+        "AD_INDEX_EXTRA_MEDIA_COLUMNS", "매체;rd[dim_media]"
+    )
 
     AUTO_BID_SHEET_ENABLED: bool = _env_bool("AUTO_BID_SHEET_ENABLED", True)
     AUTO_BID_SPREADSHEET_ID: str = _env(

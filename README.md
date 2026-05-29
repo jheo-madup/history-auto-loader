@@ -198,15 +198,22 @@ GOOGLE_AC_CUSTOMER_IDS=
 AD_INDEX_ENABLED=true
 AD_INDEX_SPREADSHEET_ID=12w86uqNNzzHjR0ycsNTPuJZ0VH6a8VL9ky2Cm6WwDGg
 AD_INDEX_WORKSHEET_NAME=광고 인덱스
+AD_INDEX_WORKSHEET_GID=2063584549
 AD_INDEX_HEADER_ROW=5
 AD_INDEX_CAMPAIGN_COLUMN=Campaign
 AD_INDEX_AD_GROUP_COLUMN=Ad Group
 AD_INDEX_MEDIA_COLUMN=rd[dim_media]
+AD_INDEX_EXTRA_WORKSHEET_NAMES=[DA] URL 생성;[BS, 신제품검색] URL 생성;[SA,파컨] URL 생성
+AD_INDEX_EXTRA_HEADER_ROW=7
+AD_INDEX_EXTRA_CAMPAIGN_COLUMNS=캠페인 (Campaign);캠페인명;Campaign
+AD_INDEX_EXTRA_AD_GROUP_COLUMNS=그룹 (Ad Group);그룹명;Ad Group
+AD_INDEX_EXTRA_MEDIA_COLUMNS=매체;rd[dim_media]
 ```
 
 인덱스 값 `네이버SA_파워콘텐츠`는 히스토리 요약 탭의 `네이버 파워컨텐츠` 컬럼으로 자동 변환합니다.
 캠페인명뿐 아니라 광고그룹명도 인덱스의 `Ad Group` 컬럼에서 찾아 매체를 보정합니다.
 인덱스에서 캠페인명/광고그룹명을 모두 찾지 못하면 기존 수집 매체값을 사용하고 로그에 `인덱스 매칭 실패`를 남깁니다.
+`광고 인덱스` 탭의 수식 반영이 늦거나 일부 URL 생성 탭이 누락되어도 `[DA] URL 생성`, `[BS, 신제품검색] URL 생성`, `[SA,파컨] URL 생성` 탭을 보조 인덱스로 함께 읽어 매체를 보정합니다. 여러 보조 탭을 넣어야 하면 `AD_INDEX_EXTRA_WORKSHEET_NAMES`에 세미콜론(`;`)으로 구분해 지정합니다.
 
 메타는 여러 상품/캠페인 분류가 같은 매체 안에서 함께 운영되므로 요약 제목을 캠페인명이 아니라 광고 인덱스의 `rd[dim_cat1_campaign]` 값으로 표시합니다.
 

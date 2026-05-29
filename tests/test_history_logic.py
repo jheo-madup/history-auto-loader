@@ -9,7 +9,7 @@ from processors.filters import should_keep_raw
 from processors.google_media_router import classify_google_media
 from processors.summarizer import build_summary
 from utils.hash_utils import attach_row_hash, build_row_hash
-from writers.ad_index_reader import CampaignMediaIndex
+from writers.ad_index_reader import CampaignMediaIndex, _coerce_extra_index_rows
 from writers.sheet_writer import dedupe_raw_records, filter_recent_raw_records
 
 
@@ -74,6 +74,67 @@ class HistoryLogicTest(unittest.TestCase):
 
         self.assertEqual(routed[0]["매체"], "구글SA")
         self.assertEqual(routed[1]["매체"], "네이버 파워컨텐츠")
+
+    def test_extra_url_sheet_rows_feed_media_index(self) -> None:
+        rows = _coerce_extra_index_rows(
+            values=[
+                ["유의 사항"],
+                [""],
+                ["함수 보관"],
+                [""],
+                ["[캠페인/그룹 기입]"],
+                ["수기", "함수", "수기", "수기", "수기", "수기", "수기", "함수"],
+                [
+                    "세팅 일자",
+                    "KEY",
+                    "캠페인 (Campaign)",
+                    "그룹 (Ad Group)",
+                    "소재 (Ad Creative) / Title",
+                    "영역 (Content) / Description",
+                    "키워드 (Term)",
+                    "매체",
+                ],
+                [
+                    "Pmax",
+                    "key",
+                    "gg_all_web_all_non_non_ao-success_pmax_2604",
+                    "ua_non_non_[251222_dm_img_usp-dm-1st_total",
+                    "",
+                    "",
+                    "",
+                    "구글AC",
+                ],
+            ],
+            header_row=7,
+            primary_width=11,
+            primary_key_index=0,
+            primary_campaign_index=1,
+            primary_ad_group_index=2,
+            primary_media_index=10,
+            campaign_columns=["캠페인 (Campaign)", "캠페인명", "Campaign"],
+            ad_group_columns=["그룹 (Ad Group)", "그룹명", "Ad Group"],
+            media_columns=["매체", "rd[dim_media]"],
+        )
+        index = CampaignMediaIndex(
+            campaign_to_media={rows[0][1].lower(): rows[0][10]},
+            ad_group_to_media={},
+            campaign_to_summary_entity={},
+            ad_group_to_summary_entity={},
+            summary_entity_media="메타",
+        )
+
+        routed = index.route_rows(
+            [
+                {
+                    "캠페인명": "gg_all_web_all_non_non_ao-success_pmax_2604",
+                    "광고그룹명": "",
+                    "매체": "구글SA",
+                }
+            ]
+        )
+
+        self.assertEqual(rows[0][10], "구글AC")
+        self.assertEqual(routed[0]["매체"], "구글AC")
 
     def test_brand_search_fallback_routes_to_bs_naver(self) -> None:
         index = CampaignMediaIndex(

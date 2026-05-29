@@ -98,7 +98,7 @@ def load_campaign_media_index(settings: Any, logger: Any) -> CampaignMediaIndex 
         return None
 
     try:
-        values = _read_index_values(settings)
+        values = _read_index_values(settings, logger=logger)
         index = _build_index(settings=settings, values=values, logger=logger)
     except AdIndexError:
         raise
@@ -113,7 +113,7 @@ def load_campaign_media_index(settings: Any, logger: Any) -> CampaignMediaIndex 
     return index
 
 
-def _read_index_values(settings: Any) -> list[list[str]]:
+def _read_index_values(settings: Any, logger: Any) -> list[list[str]]:
     credentials, _ = google.auth.default(
         scopes=[
             "https://www.googleapis.com/auth/spreadsheets",
@@ -124,8 +124,22 @@ def _read_index_values(settings: Any) -> list[list[str]]:
 
     try:
         spreadsheet = client.open_by_key(settings.AD_INDEX_SPREADSHEET_ID)
-        worksheet = spreadsheet.worksheet(settings.AD_INDEX_WORKSHEET_NAME)
-        return worksheet.get_all_values()
+        worksheet = _worksheet_by_name_or_gid(
+            spreadsheet=spreadsheet,
+            name=settings.AD_INDEX_WORKSHEET_NAME,
+            gid=getattr(settings, "AD_INDEX_WORKSHEET_GID", ""),
+        )
+        values = worksheet.get_all_values()
+        extra_rows = _read_extra_index_rows(
+            spreadsheet=spreadsheet,
+            settings=settings,
+            primary_values=values,
+            logger=logger,
+        )
+        if extra_rows:
+            logger.info("광고 인덱스 보조 탭 매핑 로드: %s행", len(extra_rows))
+            values = values + extra_rows
+        return values
     except SpreadsheetNotFound as exc:
         raise AdIndexError(
             f"광고 인덱스 Spreadsheet 접근 실패: {settings.AD_INDEX_SPREADSHEET_ID}"
@@ -136,6 +150,113 @@ def _read_index_values(settings: Any) -> list[list[str]]:
         ) from exc
     except APIError as exc:
         raise AdIndexError(f"광고 인덱스 API 오류: {exc}") from exc
+
+
+def _worksheet_by_name_or_gid(
+    spreadsheet: gspread.Spreadsheet,
+    name: str,
+    gid: str = "",
+) -> gspread.Worksheet:
+    if str(gid or "").strip():
+        target_gid = str(gid).strip()
+        for worksheet in spreadsheet.worksheets():
+            if str(worksheet.id) == target_gid:
+                return worksheet
+    return spreadsheet.worksheet(name)
+
+
+def _read_extra_index_rows(
+    spreadsheet: gspread.Spreadsheet,
+    settings: Any,
+    primary_values: list[list[str]],
+    logger: Any,
+) -> list[list[str]]:
+    sheet_names = _split_setting(getattr(settings, "AD_INDEX_EXTRA_WORKSHEET_NAMES", ""))
+    if not sheet_names:
+        return []
+
+    header_row = _header_row(settings.AD_INDEX_HEADER_ROW)
+    if len(primary_values) < header_row:
+        return []
+    primary_header = [str(value).strip() for value in primary_values[header_row - 1]]
+    campaign_index = _required_column(primary_header, settings.AD_INDEX_CAMPAIGN_COLUMN)
+    ad_group_index = _optional_column(primary_header, settings.AD_INDEX_AD_GROUP_COLUMN)
+    media_index = _required_column(primary_header, settings.AD_INDEX_MEDIA_COLUMN)
+    key_index = _optional_column(primary_header, "key")
+    if campaign_index is None or media_index is None:
+        return []
+
+    extra_rows: list[list[str]] = []
+    for sheet_name in sheet_names:
+        try:
+            worksheet = spreadsheet.worksheet(sheet_name)
+            values = worksheet.get_all_values()
+        except WorksheetNotFound:
+            logger.warning("광고 인덱스 보조 탭을 찾을 수 없습니다: %s", sheet_name)
+            continue
+        if not values:
+            continue
+        extra_rows.extend(
+            _coerce_extra_index_rows(
+                values=values,
+                header_row=_header_row(getattr(settings, "AD_INDEX_EXTRA_HEADER_ROW", "7")),
+                primary_width=len(primary_header),
+                primary_key_index=key_index,
+                primary_campaign_index=campaign_index,
+                primary_ad_group_index=ad_group_index,
+                primary_media_index=media_index,
+                campaign_columns=_split_setting(
+                    getattr(settings, "AD_INDEX_EXTRA_CAMPAIGN_COLUMNS", "")
+                ),
+                ad_group_columns=_split_setting(
+                    getattr(settings, "AD_INDEX_EXTRA_AD_GROUP_COLUMNS", "")
+                ),
+                media_columns=_split_setting(
+                    getattr(settings, "AD_INDEX_EXTRA_MEDIA_COLUMNS", "")
+                ),
+            )
+        )
+    return extra_rows
+
+
+def _coerce_extra_index_rows(
+    *,
+    values: list[list[str]],
+    header_row: int,
+    primary_width: int,
+    primary_key_index: int | None,
+    primary_campaign_index: int,
+    primary_ad_group_index: int | None,
+    primary_media_index: int,
+    campaign_columns: list[str],
+    ad_group_columns: list[str],
+    media_columns: list[str],
+) -> list[list[str]]:
+    if len(values) < header_row:
+        return []
+    header = [str(value).strip() for value in values[header_row - 1]]
+    campaign_index = _first_existing_column(header, campaign_columns)
+    ad_group_index = _first_existing_column(header, ad_group_columns)
+    media_index = _first_existing_column(header, media_columns)
+    if campaign_index is None or media_index is None:
+        return []
+
+    rows: list[list[str]] = []
+    for source_row in values[header_row:]:
+        campaign = _cell(source_row, campaign_index)
+        ad_group = _cell(source_row, ad_group_index) if ad_group_index is not None else ""
+        media = _cell(source_row, media_index)
+        if not media or (not campaign and not ad_group):
+            continue
+        row = [""] * primary_width
+        if primary_key_index is not None:
+            row[primary_key_index] = f"{campaign}{ad_group}"
+        row[primary_campaign_index] = campaign
+        if primary_ad_group_index is not None:
+            row[primary_ad_group_index] = ad_group
+        row[primary_media_index] = media
+        rows.append(row)
+    return rows
 
 
 def _build_index(settings: Any, values: list[list[str]], logger: Any) -> CampaignMediaIndex:
@@ -215,6 +336,14 @@ def _required_column(header: list[str], column_name: str) -> int | None:
         return None
 
 
+def _first_existing_column(header: list[str], column_names: list[str]) -> int | None:
+    for column_name in column_names:
+        column_index = _required_column(header, column_name)
+        if column_index is not None:
+            return column_index
+    return None
+
+
 def _optional_column(header: list[str], column_name: str) -> int | None:
     if not column_name:
         return None
@@ -230,6 +359,10 @@ def _header_row(value: str) -> int:
 
 def _cell(row: list[str], index: int) -> str:
     return str(row[index]).strip() if len(row) > index else ""
+
+
+def _split_setting(value: str) -> list[str]:
+    return [part.strip() for part in str(value or "").split(";") if part.strip()]
 
 
 def _normalize_campaign(value: str) -> str:
