@@ -103,6 +103,7 @@ function onEdit(e) {
   }
 
   if (logs.length) {
+    ensureAutoBidSheetSize_(logSheet, logSheet.getLastRow() + logs.length, AUTO_BID_LOG_HEADERS.length);
     logSheet.getRange(logSheet.getLastRow() + 1, 1, logs.length, AUTO_BID_LOG_HEADERS.length).setValues(logs);
   }
   updateAutoBidSnapshotRows_(snapshotSheet, sheet, firstRow, lastRow, targetCol, headerMap);
@@ -143,6 +144,7 @@ function ensureAutoBidLogSheet_(spreadsheet) {
   if (!sheet) sheet = spreadsheet.insertSheet(AUTO_BID_LOG_SHEET_NAME);
   const header = sheet.getRange(1, 1, 1, AUTO_BID_LOG_HEADERS.length).getDisplayValues()[0];
   if (header.join('') !== AUTO_BID_LOG_HEADERS.join('')) {
+    ensureAutoBidSheetSize_(sheet, 1, AUTO_BID_LOG_HEADERS.length);
     sheet.getRange(1, 1, 1, AUTO_BID_LOG_HEADERS.length).setValues([AUTO_BID_LOG_HEADERS]);
   }
   return sheet;
@@ -153,6 +155,7 @@ function ensureAutoBidSnapshotSheet_(spreadsheet) {
   if (!sheet) sheet = spreadsheet.insertSheet(AUTO_BID_SNAPSHOT_SHEET_NAME);
   const header = sheet.getRange(1, 1, 1, AUTO_BID_SNAPSHOT_HEADERS.length).getDisplayValues()[0];
   if (header.join('') !== AUTO_BID_SNAPSHOT_HEADERS.join('')) {
+    ensureAutoBidSheetSize_(sheet, 1, AUTO_BID_SNAPSHOT_HEADERS.length);
     sheet.getRange(1, 1, 1, AUTO_BID_SNAPSHOT_HEADERS.length).setValues([AUTO_BID_SNAPSHOT_HEADERS]);
   }
   sheet.hideSheet();
@@ -189,7 +192,17 @@ function updateAutoBidSnapshotRows_(snapshotSheet, sheet, firstRow, lastRow, tar
     }
   }
   if (upserts.length) {
+    ensureAutoBidSheetSize_(snapshotSheet, snapshotSheet.getLastRow() + upserts.length, AUTO_BID_SNAPSHOT_HEADERS.length);
     snapshotSheet.getRange(snapshotSheet.getLastRow() + 1, 1, upserts.length, AUTO_BID_SNAPSHOT_HEADERS.length).setValues(upserts);
+  }
+}
+
+function ensureAutoBidSheetSize_(sheet, requiredRows, requiredColumns) {
+  if (sheet.getMaxRows() < requiredRows) {
+    sheet.insertRowsAfter(sheet.getMaxRows(), requiredRows - sheet.getMaxRows());
+  }
+  if (sheet.getMaxColumns() < requiredColumns) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), requiredColumns - sheet.getMaxColumns());
   }
 }
 
