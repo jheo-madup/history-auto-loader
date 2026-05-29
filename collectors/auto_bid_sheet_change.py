@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any
 
@@ -73,11 +74,31 @@ class AutoBidSheetChangeCollector:
             return []
 
         header = [str(value).strip() for value in values[header_row - 1]]
-        keyword_index = _required_column(header, self.settings.AUTO_BID_KEYWORD_COLUMN)
-        rank_index = _required_column(header, self.settings.AUTO_BID_TARGET_RANK_COLUMN)
-        campaign_index = _optional_column(header, self.settings.AUTO_BID_CAMPAIGN_COLUMN)
-        ad_group_index = _optional_column(header, self.settings.AUTO_BID_AD_GROUP_COLUMN)
-        media_index = _optional_column(header, self.settings.AUTO_BID_MEDIA_COLUMN)
+        keyword_index = _required_column(
+            header,
+            self.settings.AUTO_BID_KEYWORD_COLUMN,
+            aliases=("키워드", "keyword", "Keyword"),
+        )
+        rank_index = _required_column(
+            header,
+            self.settings.AUTO_BID_TARGET_RANK_COLUMN,
+            aliases=("목표순위", "목표 순위", "target_rank", "Target Rank"),
+        )
+        campaign_index = _optional_column(
+            header,
+            self.settings.AUTO_BID_CAMPAIGN_COLUMN,
+            aliases=("캠페인명", "캠페인", "Campaign", "campaign"),
+        )
+        ad_group_index = _optional_column(
+            header,
+            self.settings.AUTO_BID_AD_GROUP_COLUMN,
+            aliases=("광고그룹명", "광고그룹", "Ad Group", "ad_group"),
+        )
+        media_index = _optional_column(
+            header,
+            self.settings.AUTO_BID_MEDIA_COLUMN,
+            aliases=("매체", "Media", "media"),
+        )
 
         records: list[dict[str, str]] = []
         for row in values[header_row:]:
@@ -179,11 +200,11 @@ def build_auto_bid_change_rows(
         if not keyword:
             continue
         previous = previous_snapshot.get(_snapshot_key(keyword))
-        if previous is None:
-            continue
-        old_rank = normalize_rank(previous.get("target_rank", ""))
+        old_rank = normalize_rank(previous.get("target_rank", "")) if previous else ""
         new_rank = normalize_rank(record.get("target_rank", ""))
         if old_rank == new_rank:
+            continue
+        if not old_rank and not new_rank:
             continue
         raw_text = (
             "source=bid_sheet"
@@ -261,20 +282,33 @@ def _ensure_state_header(worksheet: gspread.Worksheet) -> None:
     worksheet.update(values=[STATE_COLUMNS], range_name="A1", value_input_option="USER_ENTERED")
 
 
-def _required_column(header: list[str], column_name: str) -> int:
-    try:
-        return header.index(column_name)
-    except ValueError as exc:
-        raise ValueError(f"자동입찰시트 필수 컬럼이 없습니다: {column_name}") from exc
+def _required_column(header: list[str], column_name: str, aliases: tuple[str, ...] = ()) -> int:
+    index = _find_column(header, (column_name, *aliases))
+    if index is None:
+        expected = ", ".join(value for value in (column_name, *aliases) if value)
+        raise ValueError(f"자동입찰시트 필수 컬럼이 없습니다: {expected}") from None
+    return index
 
 
-def _optional_column(header: list[str], column_name: str) -> int | None:
-    if not column_name:
-        return None
-    try:
-        return header.index(column_name)
-    except ValueError:
-        return None
+def _optional_column(header: list[str], column_name: str, aliases: tuple[str, ...] = ()) -> int | None:
+    return _find_column(header, (column_name, *aliases))
+
+
+def _find_column(header: list[str], names: tuple[str, ...]) -> int | None:
+    normalized_header = [_normalize_column_name(value) for value in header]
+    for name in names:
+        normalized_name = _normalize_column_name(name)
+        if not normalized_name:
+            continue
+        try:
+            return normalized_header.index(normalized_name)
+        except ValueError:
+            continue
+    return None
+
+
+def _normalize_column_name(value: str) -> str:
+    return re.sub(r"[\s_\-]+", "", str(value or "").strip().lower())
 
 
 def _cell(row: list[str], index: int) -> str:

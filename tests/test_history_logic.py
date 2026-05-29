@@ -4,7 +4,7 @@ import unittest
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from collectors.auto_bid_sheet_change import build_auto_bid_change_rows
+from collectors.auto_bid_sheet_change import _optional_column, _required_column, build_auto_bid_change_rows
 from processors.filters import should_keep_raw
 from processors.summarizer import build_summary
 from utils.hash_utils import build_row_hash
@@ -105,6 +105,28 @@ class HistoryLogicTest(unittest.TestCase):
             build_summary(rows, "네이버SA"),
             "[삼성증권] 목표순위 3순위 → 5순위 변경",
         )
+
+    def test_auto_bid_column_aliases_match_operating_sheet_headers(self) -> None:
+        header = ["키워드", "캠페인명", "광고그룹명", "목표 순위"]
+
+        self.assertEqual(_required_column(header, "목표순위", aliases=("목표 순위",)), 3)
+        self.assertEqual(_optional_column(header, "Campaign", aliases=("캠페인명",)), 1)
+        self.assertEqual(_optional_column(header, "Ad Group", aliases=("광고그룹명",)), 2)
+
+    def test_auto_bid_new_keyword_without_old_rank_is_summarized(self) -> None:
+        now = datetime(2026, 5, 29, 13, 0, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+        rows = build_auto_bid_change_rows(
+            current_records=[{"keyword": "해외주식", "target_rank": "5", "campaign": "nmo_일반", "ad_group": "m_일반", "media": ""}],
+            previous_snapshot={"삼성증권": {"target_rank": "3"}},
+            collected_at=now,
+            start_at=now.replace(hour=0),
+            end_at=now,
+        )
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["캠페인명"], "nmo_일반")
+        self.assertEqual(rows[0]["광고그룹명"], "m_일반")
+        self.assertEqual(build_summary(rows, "네이버SA"), "[해외주식] 목표순위 5순위로 변경")
 
     def test_many_asset_changes_are_summarized_by_count(self) -> None:
         rows = [
