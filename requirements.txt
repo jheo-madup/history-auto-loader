@@ -1,0 +1,9 @@
+google-ads
+gspread
+google-auth
+google-cloud-secret-manager
+google-cloud-storage
+pandas
+openpyxl
+playwright
+python-dotenv
