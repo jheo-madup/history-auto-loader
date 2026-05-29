@@ -54,7 +54,10 @@ def build_summary(rows: list[dict[str, Any]], media: str) -> str:
         )
     )
 
-    aggregate_lines, aggregate_indexes = _asset_aggregate_lines(candidates)
+    auto_bid_lines, auto_bid_indexes = _auto_bid_aggregate_lines(candidates)
+    asset_lines, asset_indexes = _asset_aggregate_lines(candidates)
+    aggregate_lines = auto_bid_lines + asset_lines
+    aggregate_indexes = auto_bid_indexes | asset_indexes
     grouped: OrderedDict[tuple[str, str], dict[str, Any]] = OrderedDict()
     for index, (priority, label, row) in enumerate(candidates):
         if index in aggregate_indexes:
@@ -335,6 +338,32 @@ def _asset_aggregate_lines(
     return lines, aggregate_indexes
 
 
+def _auto_bid_aggregate_lines(
+    candidates: list[tuple[int, str, dict[str, Any]]],
+) -> tuple[list[tuple[int, str]], set[int]]:
+    grouped: OrderedDict[tuple[str, str], list[int]] = OrderedDict()
+    for index, (_, label, row) in enumerate(candidates):
+        if label != AUTO_BID_CHANGE_TYPE:
+            continue
+        ad_group = str(row.get("광고그룹명", "")).strip()
+        campaign = str(row.get("캠페인명", "")).strip()
+        entity = ad_group or campaign
+        if not entity:
+            continue
+        sort_key = "|".join((str(row.get("매체", "")), campaign, ad_group))
+        grouped.setdefault((entity, sort_key), []).append(index)
+
+    lines: list[tuple[int, str]] = []
+    aggregate_indexes: set[int] = set()
+    for (entity, _), indexes in grouped.items():
+        total_count = sum(_event_count_for_label(candidates[index][2], candidates[index][1]) for index in indexes)
+        if total_count < 4:
+            continue
+        aggregate_indexes.update(indexes)
+        lines.append((3, f"[{entity}] 목표순위 변경 키워드 {total_count}건"))
+    return lines, aggregate_indexes
+
+
 def _asset_aggregate_key(label: str, row: dict[str, Any]) -> tuple[str, str, str] | None:
     if not label.startswith("소재 "):
         return None
@@ -441,10 +470,10 @@ def _auto_bid_line(row: dict[str, Any]) -> str:
     old_rank = _rank_text(row.get("이전값", ""))
     new_rank = _rank_text(row.get("변경값", ""))
     if old_rank and new_rank:
-        return f"[{keyword}] 목표순위 {old_rank} → {new_rank} 변경"
+        return f"{keyword} 목표순위 {old_rank} → {new_rank} 변경"
     if new_rank:
-        return f"[{keyword}] 목표순위 {new_rank}로 변경"
-    return f"[{keyword}] 목표순위 변경"
+        return f"{keyword} 목표순위 {new_rank}로 신규 설정"
+    return f"{keyword} 목표순위 변경"
 
 
 def _rank_text(value: Any) -> str:

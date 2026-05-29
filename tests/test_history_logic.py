@@ -4,10 +4,10 @@ import unittest
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from collectors.auto_bid_sheet_change import _optional_column, _required_column, build_auto_bid_change_rows
+from collectors.auto_bid_sheet_change import build_auto_bid_rows_from_log_records
 from processors.filters import should_keep_raw
 from processors.summarizer import build_summary
-from utils.hash_utils import build_row_hash
+from utils.hash_utils import attach_row_hash, build_row_hash
 from writers.ad_index_reader import CampaignMediaIndex
 from writers.sheet_writer import dedupe_raw_records, filter_recent_raw_records
 
@@ -91,9 +91,17 @@ class HistoryLogicTest(unittest.TestCase):
 
     def test_auto_bid_target_rank_change_is_raw_and_summary(self) -> None:
         now = datetime(2026, 5, 29, 13, 0, 0, tzinfo=ZoneInfo("Asia/Seoul"))
-        rows = build_auto_bid_change_rows(
-            current_records=[{"keyword": "삼성증권", "target_rank": "5", "campaign": "", "ad_group": "", "media": ""}],
-            previous_snapshot={"삼성증권": {"target_rank": "3"}},
+        rows = build_auto_bid_rows_from_log_records(
+            log_records=[
+                _auto_bid_log(
+                    keyword="주식계좌개설",
+                    campaign="nmo_일반",
+                    ad_group="m_일반",
+                    old_value="4",
+                    new_value="3",
+                    raw_text="주식계좌개설 목표순위 4순위 → 3순위 변경",
+                )
+            ],
             collected_at=now,
             start_at=now.replace(hour=0),
             end_at=now,
@@ -103,21 +111,22 @@ class HistoryLogicTest(unittest.TestCase):
         self.assertTrue(should_keep_raw(rows[0]))
         self.assertEqual(
             build_summary(rows, "네이버SA"),
-            "[삼성증권] 목표순위 3순위 → 5순위 변경",
+            "주식계좌개설 목표순위 4순위 → 3순위 변경",
         )
 
-    def test_auto_bid_column_aliases_match_operating_sheet_headers(self) -> None:
-        header = ["키워드", "캠페인명", "광고그룹명", "목표 순위"]
-
-        self.assertEqual(_required_column(header, "목표순위", aliases=("목표 순위",)), 3)
-        self.assertEqual(_optional_column(header, "Campaign", aliases=("캠페인명",)), 1)
-        self.assertEqual(_optional_column(header, "Ad Group", aliases=("광고그룹명",)), 2)
-
-    def test_auto_bid_new_keyword_without_old_rank_is_summarized(self) -> None:
+    def test_auto_bid_new_rank_setting_is_summarized(self) -> None:
         now = datetime(2026, 5, 29, 13, 0, 0, tzinfo=ZoneInfo("Asia/Seoul"))
-        rows = build_auto_bid_change_rows(
-            current_records=[{"keyword": "해외주식", "target_rank": "5", "campaign": "nmo_일반", "ad_group": "m_일반", "media": ""}],
-            previous_snapshot={"삼성증권": {"target_rank": "3"}},
+        rows = build_auto_bid_rows_from_log_records(
+            log_records=[
+                _auto_bid_log(
+                    keyword="ISA",
+                    campaign="nmo_일반",
+                    ad_group="m_일반",
+                    old_value="",
+                    new_value="3",
+                    raw_text="ISA 목표순위 3순위로 신규 설정",
+                )
+            ],
             collected_at=now,
             start_at=now.replace(hour=0),
             end_at=now,
@@ -126,7 +135,65 @@ class HistoryLogicTest(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["캠페인명"], "nmo_일반")
         self.assertEqual(rows[0]["광고그룹명"], "m_일반")
-        self.assertEqual(build_summary(rows, "네이버SA"), "[해외주식] 목표순위 5순위로 변경")
+        self.assertEqual(build_summary(rows, "네이버SA"), "ISA 목표순위 3순위로 신규 설정")
+
+    def test_auto_bid_non_target_rank_field_is_ignored(self) -> None:
+        now = datetime(2026, 5, 29, 13, 0, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+        rows = build_auto_bid_rows_from_log_records(
+            log_records=[
+                _auto_bid_log(
+                    field="최대 입찰가",
+                    keyword="주식계좌개설",
+                    old_value="100",
+                    new_value="200",
+                    raw_text="주식계좌개설 최대 입찰가 변경",
+                )
+            ],
+            collected_at=now,
+            start_at=now.replace(hour=0),
+            end_at=now,
+        )
+
+        self.assertEqual(rows, [])
+
+    def test_many_auto_bid_rank_changes_are_summarized_by_count(self) -> None:
+        now = datetime(2026, 5, 29, 13, 0, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+        rows = build_auto_bid_rows_from_log_records(
+            log_records=[
+                _auto_bid_log(
+                    keyword=f"키워드{i}",
+                    campaign="nmo_일반",
+                    ad_group="m_일반",
+                    old_value="4",
+                    new_value="3",
+                    keyword_id=f"kw{i}",
+                    raw_text=f"키워드{i} 목표순위 4순위 → 3순위 변경",
+                )
+                for i in range(5)
+            ],
+            collected_at=now,
+            start_at=now.replace(hour=0),
+            end_at=now,
+        )
+
+        self.assertEqual(build_summary(rows, "네이버SA"), "[m_일반] 목표순위 변경 키워드 5건")
+
+    def test_auto_bid_duplicate_log_rows_dedupe_by_row_hash(self) -> None:
+        now = datetime(2026, 5, 29, 13, 0, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+        rows = build_auto_bid_rows_from_log_records(
+            log_records=[
+                _auto_bid_log(keyword="주식계좌개설", keyword_id="kw-1", old_value="4", new_value="3"),
+                _auto_bid_log(keyword="주식계좌개설", keyword_id="kw-1", old_value="4", new_value="3"),
+            ],
+            collected_at=now,
+            start_at=now.replace(hour=0),
+            end_at=now,
+        )
+        hashed = [attach_row_hash(row) for row in rows]
+
+        self.assertEqual(len(hashed), 2)
+        self.assertEqual(hashed[0]["row_hash"], hashed[1]["row_hash"])
+        self.assertEqual(len(dedupe_raw_records(hashed)), 1)
 
     def test_many_asset_changes_are_summarized_by_count(self) -> None:
         rows = [
@@ -219,6 +286,45 @@ def _row(
         "원본리소스명": "",
         "raw_text": content,
         "row_hash": "",
+    }
+
+
+def _auto_bid_log(
+    *,
+    changed_at: str = "2026-05-29 12:00:00",
+    changed_date: str = "2026-05-29",
+    actor: str = "user@company.com",
+    sheet_name: str = "자동입찰2_네이버SA_키워드 설정",
+    row_number: str = "2",
+    keyword: str = "주식계좌개설",
+    campaign: str = "nmo_일반",
+    campaign_id: str = "cmp-1",
+    ad_group: str = "m_일반",
+    ad_group_id: str = "grp-1",
+    keyword_id: str = "kw-1",
+    device: str = "PC",
+    field: str = "목표 순위",
+    old_value: str = "4",
+    new_value: str = "3",
+    raw_text: str = "주식계좌개설 목표순위 4순위 → 3순위 변경",
+) -> dict[str, str]:
+    return {
+        "변경일시": changed_at,
+        "변경일자": changed_date,
+        "변경자": actor,
+        "시트명": sheet_name,
+        "행번호": row_number,
+        "키워드": keyword,
+        "캠페인명": campaign,
+        "캠페인 ID": campaign_id,
+        "광고그룹명": ad_group,
+        "광고그룹 ID": ad_group_id,
+        "키워드 ID": keyword_id,
+        "디바이스": device,
+        "변경필드": field,
+        "이전값": old_value,
+        "변경값": new_value,
+        "raw_text": raw_text,
     }
 
 

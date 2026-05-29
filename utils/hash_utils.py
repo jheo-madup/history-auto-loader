@@ -18,11 +18,15 @@ HASH_FIELDS = [
 ]
 
 BID_SHEET_HASH_FIELDS = [
+    "_hash_source",
     "일자",
+    "_auto_bid_keyword_id",
     "키워드명",
+    "캠페인명",
+    "광고그룹명",
     "이전값",
     "변경값",
-    "raw_text",
+    "변경필드",
 ]
 
 
@@ -43,6 +47,7 @@ def _normalize(value: Any) -> str:
 
 
 def _is_bid_sheet_row(row: dict[str, Any]) -> bool:
-    if str(row.get("_hash_source", "")).strip() == "bid_sheet":
+    if str(row.get("_hash_source", "")).strip() in {"bid_sheet", "auto_bid_sheet"}:
         return True
-    return "source=bid_sheet" in str(row.get("raw_text", ""))
+    raw_text = str(row.get("raw_text", ""))
+    return "source=bid_sheet" in raw_text or "source=auto_bid_sheet" in raw_text

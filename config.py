@@ -144,6 +144,8 @@ class Settings:
     AUTO_BID_CAMPAIGN_COLUMN: str = _env("AUTO_BID_CAMPAIGN_COLUMN", "Campaign")
     AUTO_BID_AD_GROUP_COLUMN: str = _env("AUTO_BID_AD_GROUP_COLUMN", "Ad Group")
     AUTO_BID_MEDIA_COLUMN: str = _env("AUTO_BID_MEDIA_COLUMN")
+    AUTO_BID_LOG_WORKSHEET_NAME: str = _env("AUTO_BID_LOG_WORKSHEET_NAME", "자동입찰_변경로그")
+    AUTO_BID_LOG_LOOKBACK_DAYS: str = _env("AUTO_BID_LOG_LOOKBACK_DAYS", "7")
     AUTO_BID_STATE_WORKSHEET_NAME: str = _env(
         "AUTO_BID_STATE_WORKSHEET_NAME", "_자동입찰_snapshot_state"
     )

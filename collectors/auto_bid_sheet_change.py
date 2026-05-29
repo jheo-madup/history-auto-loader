@@ -1,23 +1,36 @@
 from __future__ import annotations
 
-import re
-from datetime import datetime
+from datetime import datetime, time, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import google.auth
 import gspread
-from gspread.exceptions import APIError, WorksheetNotFound
+from gspread.exceptions import WorksheetNotFound
+
+from utils.datetime_utils import parse_change_datetime
 
 
-STATE_COLUMNS = [
-    "keyword",
-    "target_rank",
-    "campaign",
-    "ad_group",
-    "media",
+LOG_COLUMNS = [
+    "변경일시",
+    "변경일자",
+    "변경자",
+    "시트명",
+    "행번호",
+    "키워드",
+    "캠페인명",
+    "캠페인 ID",
+    "광고그룹명",
+    "광고그룹 ID",
+    "키워드 ID",
+    "디바이스",
+    "변경필드",
+    "이전값",
+    "변경값",
     "raw_text",
-    "updated_at",
 ]
+
+AUTO_BID_CHANGE_TYPE = "자동입찰 목표순위 변경"
 
 
 class AutoBidSheetChangeCollector:
@@ -44,200 +57,114 @@ class AutoBidSheetChangeCollector:
         end_at: datetime,
         collected_at: datetime,
     ) -> list[dict[str, Any]]:
-        current_records = self._read_current_records()
-        previous_snapshot = self._read_snapshot()
-        rows = build_auto_bid_change_rows(
-            current_records=current_records,
-            previous_snapshot=previous_snapshot,
-            collected_at=collected_at,
+        log_start_at, log_end_at = _log_read_window(
             start_at=start_at,
             end_at=end_at,
+            collected_at=collected_at,
+            timezone_name=self.settings.TIMEZONE,
+            lookback_days=int(getattr(self.settings, "AUTO_BID_LOG_LOOKBACK_DAYS", "7") or 7),
+        )
+        records = self._read_log_records()
+        rows = build_auto_bid_rows_from_log_records(
+            log_records=records,
+            collected_at=collected_at,
+            start_at=log_start_at,
+            end_at=log_end_at,
+            timezone_name=self.settings.TIMEZONE,
             fallback_media=self.settings.AUTO_BID_FALLBACK_MEDIA,
         )
-        self._write_snapshot(current_records=current_records, collected_at=collected_at)
-        if not previous_snapshot:
-            self.logger.info("자동입찰시트 최초 스냅샷 저장: %s건", len(current_records))
-            return []
-        self.logger.info("자동입찰시트 목표순위 변경 감지: %s건", len(rows))
+        self.logger.info(
+            "자동입찰 변경로그 조회: %s건 / Raw 후보 %s건 (%s ~ %s)",
+            len(records),
+            len(rows),
+            _dt_text(log_start_at),
+            _dt_text(log_end_at),
+        )
         return rows
 
-    def _read_current_records(self) -> list[dict[str, str]]:
+    def _read_log_records(self) -> list[dict[str, str]]:
         spreadsheet = self.client.open_by_key(self.settings.AUTO_BID_SPREADSHEET_ID)
-        worksheet = _worksheet_by_name_or_gid(
-            spreadsheet=spreadsheet,
-            worksheet_name=self.settings.AUTO_BID_WORKSHEET_NAME,
-            worksheet_gid=self.settings.AUTO_BID_WORKSHEET_GID,
-        )
-        values = worksheet.get_all_values()
-        header_row = max(1, int(self.settings.AUTO_BID_HEADER_ROW))
-        if len(values) < header_row:
+        worksheet_name = getattr(self.settings, "AUTO_BID_LOG_WORKSHEET_NAME", "자동입찰_변경로그")
+        try:
+            worksheet = spreadsheet.worksheet(worksheet_name)
+        except WorksheetNotFound:
+            self.logger.warning("자동입찰 변경로그 탭을 찾을 수 없습니다: %s", worksheet_name)
             return []
 
-        header = [str(value).strip() for value in values[header_row - 1]]
-        keyword_index = _required_column(
-            header,
-            self.settings.AUTO_BID_KEYWORD_COLUMN,
-            aliases=("키워드", "keyword", "Keyword"),
-        )
-        rank_index = _required_column(
-            header,
-            self.settings.AUTO_BID_TARGET_RANK_COLUMN,
-            aliases=("목표순위", "목표 순위", "target_rank", "Target Rank"),
-        )
-        campaign_index = _optional_column(
-            header,
-            self.settings.AUTO_BID_CAMPAIGN_COLUMN,
-            aliases=("캠페인명", "캠페인", "Campaign", "campaign"),
-        )
-        ad_group_index = _optional_column(
-            header,
-            self.settings.AUTO_BID_AD_GROUP_COLUMN,
-            aliases=("광고그룹명", "광고그룹", "Ad Group", "ad_group"),
-        )
-        media_index = _optional_column(
-            header,
-            self.settings.AUTO_BID_MEDIA_COLUMN,
-            aliases=("매체", "Media", "media"),
-        )
-
-        records: list[dict[str, str]] = []
-        for row in values[header_row:]:
-            keyword = _cell(row, keyword_index)
-            if not keyword:
-                continue
-            record = {
-                "keyword": keyword,
-                "target_rank": normalize_rank(_cell(row, rank_index)),
-                "campaign": _cell(row, campaign_index) if campaign_index is not None else "",
-                "ad_group": _cell(row, ad_group_index) if ad_group_index is not None else "",
-                "media": _cell(row, media_index) if media_index is not None else "",
-                "raw_text": _row_text(header, row),
-            }
-            records.append(record)
-        return records
-
-    def _state_worksheet(self) -> gspread.Worksheet:
-        spreadsheet = self.client.open_by_key(self.settings.SPREADSHEET_ID)
-        name = self.settings.AUTO_BID_STATE_WORKSHEET_NAME
-        try:
-            worksheet = spreadsheet.worksheet(name)
-        except WorksheetNotFound:
-            worksheet = spreadsheet.add_worksheet(title=name, rows=1000, cols=len(STATE_COLUMNS))
-            try:
-                spreadsheet.batch_update(
-                    {
-                        "requests": [
-                            {
-                                "updateSheetProperties": {
-                                    "properties": {"sheetId": worksheet.id, "hidden": True},
-                                    "fields": "hidden",
-                                }
-                            }
-                        ]
-                    }
-                )
-            except APIError as exc:
-                self.logger.warning("자동입찰 스냅샷 탭 숨김 처리 실패: %s", exc)
-        _ensure_state_header(worksheet)
-        return worksheet
-
-    def _read_snapshot(self) -> dict[str, dict[str, str]]:
-        worksheet = self._state_worksheet()
         values = worksheet.get_all_values()
         if len(values) <= 1:
-            return {}
-        header = values[0]
-        snapshot: dict[str, dict[str, str]] = {}
-        for row in values[1:]:
-            record = {
-                column: row[index] if len(row) > index else ""
-                for index, column in enumerate(header)
-            }
-            keyword = record.get("keyword", "").strip()
-            if keyword:
-                snapshot[_snapshot_key(keyword)] = record
-        return snapshot
+            return []
 
-    def _write_snapshot(
-        self,
-        current_records: list[dict[str, str]],
-        collected_at: datetime,
-    ) -> None:
-        worksheet = self._state_worksheet()
-        updated_at = _dt_text(collected_at)
-        values = [STATE_COLUMNS]
-        for record in current_records:
-            values.append(
-                [
-                    record.get("keyword", ""),
-                    record.get("target_rank", ""),
-                    record.get("campaign", ""),
-                    record.get("ad_group", ""),
-                    record.get("media", ""),
-                    record.get("raw_text", ""),
-                    updated_at,
-                ]
+        header = [str(value).strip() for value in values[0]]
+        missing = [column for column in LOG_COLUMNS if column not in header]
+        if missing:
+            self.logger.warning("자동입찰 변경로그 필수 컬럼 누락: %s", ", ".join(missing))
+
+        records: list[dict[str, str]] = []
+        for values_row in values[1:]:
+            if not any(str(value).strip() for value in values_row):
+                continue
+            records.append(
+                {
+                    column: str(values_row[index]).strip() if len(values_row) > index else ""
+                    for index, column in enumerate(header)
+                }
             )
-        worksheet.clear()
-        worksheet.update(values=values, range_name="A1", value_input_option="USER_ENTERED")
+        return records
 
 
-def build_auto_bid_change_rows(
-    current_records: list[dict[str, str]],
-    previous_snapshot: dict[str, dict[str, str]],
+def build_auto_bid_rows_from_log_records(
+    log_records: list[dict[str, Any]],
     collected_at: datetime,
     start_at: datetime,
     end_at: datetime,
+    timezone_name: str = "Asia/Seoul",
     fallback_media: str = "네이버SA",
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    if not previous_snapshot:
-        return rows
+    for record in log_records:
+        if not _record_in_window(record, start_at=start_at, end_at=end_at, timezone_name=timezone_name):
+            continue
+        if not _is_target_rank_field(_get(record, "변경필드")):
+            continue
 
-    run_date = collected_at.date().isoformat()
-    for record in current_records:
-        keyword = record.get("keyword", "").strip()
-        if not keyword:
+        keyword = _get(record, "키워드")
+        old_rank = normalize_rank(_get(record, "이전값"))
+        new_rank = normalize_rank(_get(record, "변경값"))
+        if not keyword or not new_rank or old_rank == new_rank:
             continue
-        previous = previous_snapshot.get(_snapshot_key(keyword))
-        old_rank = normalize_rank(previous.get("target_rank", "")) if previous else ""
-        new_rank = normalize_rank(record.get("target_rank", ""))
-        if old_rank == new_rank:
-            continue
-        if not old_rank and not new_rank:
-            continue
-        raw_text = (
-            "source=bid_sheet"
-            f"|keyword={keyword}"
-            f"|old_rank={old_rank}"
-            f"|new_rank={new_rank}"
-            f"|date={run_date}"
-        )
+
+        changed_date = _record_date_text(record, timezone_name) or start_at.date().isoformat()
+        changed_at = _get(record, "변경일시") or f"{changed_date} 00:00:00"
+        keyword_id = _get(record, "키워드 ID")
+        content = _get(record, "raw_text") or _change_content(keyword, old_rank, new_rank)
+
         rows.append(
             {
                 "수집일시": _dt_text(collected_at),
                 "조회시작일시": _dt_text(start_at),
                 "조회종료일시": _dt_text(end_at),
-                "일자": run_date,
-                "매체": record.get("media", "").strip() or fallback_media,
+                "일자": changed_date,
+                "매체": fallback_media,
                 "계정ID": "",
                 "계정명": "",
-                "변경일시": _dt_text(collected_at),
-                "변경자": "",
-                "캠페인명": record.get("campaign", ""),
-                "광고그룹명": record.get("ad_group", ""),
+                "변경일시": changed_at,
+                "변경자": _get(record, "변경자"),
+                "캠페인명": _get(record, "캠페인명"),
+                "광고그룹명": _get(record, "광고그룹명"),
                 "소재명": "",
                 "키워드명": keyword,
                 "변경레벨": "키워드",
-                "변경유형": "자동입찰 목표순위 변경",
-                "변경작업": "수정",
+                "변경유형": AUTO_BID_CHANGE_TYPE,
+                "변경작업": "목표순위 변경",
                 "변경필드": "목표순위",
                 "이전값": old_rank,
                 "변경값": new_rank,
-                "변경내용": _change_content(keyword, old_rank, new_rank),
-                "원본리소스명": "auto_bid_sheet",
-                "raw_text": raw_text,
-                "_hash_source": "bid_sheet",
+                "변경내용": content,
+                "원본리소스명": f"auto_bid_sheet_log:{keyword_id}" if keyword_id else "auto_bid_sheet_log",
+                "raw_text": content,
+                "_hash_source": "auto_bid_sheet",
+                "_auto_bid_keyword_id": keyword_id,
                 "row_hash": "",
             }
         )
@@ -256,77 +183,71 @@ def normalize_rank(value: Any) -> str:
 def _change_content(keyword: str, old_rank: str, new_rank: str) -> str:
     if old_rank and new_rank:
         return f"{keyword} 목표순위 {old_rank}순위 → {new_rank}순위 변경"
-    if new_rank:
-        return f"{keyword} 목표순위 {new_rank}순위로 변경"
-    return f"{keyword} 목표순위 변경"
+    return f"{keyword} 목표순위 {new_rank}순위로 신규 설정"
 
 
-def _worksheet_by_name_or_gid(
-    spreadsheet: gspread.Spreadsheet,
-    worksheet_name: str,
-    worksheet_gid: str,
-) -> gspread.Worksheet:
-    if worksheet_name:
-        return spreadsheet.worksheet(worksheet_name)
-    gid = int(worksheet_gid)
-    worksheet = spreadsheet.get_worksheet_by_id(gid)
-    if worksheet is None:
-        raise WorksheetNotFound(f"워크시트 gid를 찾을 수 없습니다: {gid}")
-    return worksheet
+def _is_target_rank_field(value: Any) -> bool:
+    normalized = str(value or "").replace(" ", "").strip().lower()
+    return normalized == "목표순위"
 
 
-def _ensure_state_header(worksheet: gspread.Worksheet) -> None:
-    header = worksheet.row_values(1)
-    if header == STATE_COLUMNS:
-        return
-    worksheet.update(values=[STATE_COLUMNS], range_name="A1", value_input_option="USER_ENTERED")
+def _record_in_window(
+    record: dict[str, Any],
+    start_at: datetime,
+    end_at: datetime,
+    timezone_name: str,
+) -> bool:
+    changed_at = parse_change_datetime(_get(record, "변경일시"), timezone_name)
+    if changed_at is not None:
+        return _ensure_tz(start_at, timezone_name) <= changed_at <= _ensure_tz(end_at, timezone_name)
+
+    date_text = _get(record, "변경일자")
+    if not date_text:
+        return False
+    try:
+        changed_date = datetime.strptime(date_text[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return False
+    return _ensure_tz(start_at, timezone_name).date() <= changed_date <= _ensure_tz(end_at, timezone_name).date()
 
 
-def _required_column(header: list[str], column_name: str, aliases: tuple[str, ...] = ()) -> int:
-    index = _find_column(header, (column_name, *aliases))
-    if index is None:
-        expected = ", ".join(value for value in (column_name, *aliases) if value)
-        raise ValueError(f"자동입찰시트 필수 컬럼이 없습니다: {expected}") from None
-    return index
+def _record_date_text(record: dict[str, Any], timezone_name: str) -> str:
+    changed_at = parse_change_datetime(_get(record, "변경일시"), timezone_name)
+    if changed_at is not None:
+        return changed_at.date().isoformat()
+    date_text = _get(record, "변경일자")
+    return date_text[:10] if len(date_text) >= 10 else ""
 
 
-def _optional_column(header: list[str], column_name: str, aliases: tuple[str, ...] = ()) -> int | None:
-    return _find_column(header, (column_name, *aliases))
+def _log_read_window(
+    start_at: datetime,
+    end_at: datetime,
+    collected_at: datetime,
+    timezone_name: str,
+    lookback_days: int,
+) -> tuple[datetime, datetime]:
+    if lookback_days <= 1:
+        return start_at, end_at
+
+    tz = ZoneInfo(timezone_name)
+    local_start = _ensure_tz(start_at, timezone_name)
+    local_end = _ensure_tz(end_at, timezone_name)
+    local_collected = _ensure_tz(collected_at, timezone_name)
+    if local_start.date() != local_collected.date() or local_end.date() != local_collected.date():
+        return local_start, local_end
+
+    start_date = local_collected.date() - timedelta(days=lookback_days - 1)
+    return datetime.combine(start_date, time.min, tzinfo=tz), local_end
 
 
-def _find_column(header: list[str], names: tuple[str, ...]) -> int | None:
-    normalized_header = [_normalize_column_name(value) for value in header]
-    for name in names:
-        normalized_name = _normalize_column_name(name)
-        if not normalized_name:
-            continue
-        try:
-            return normalized_header.index(normalized_name)
-        except ValueError:
-            continue
-    return None
+def _ensure_tz(value: datetime, timezone_name: str) -> datetime:
+    tz = ZoneInfo(timezone_name)
+    return value.astimezone(tz) if value.tzinfo else value.replace(tzinfo=tz)
 
 
-def _normalize_column_name(value: str) -> str:
-    return re.sub(r"[\s_\-]+", "", str(value or "").strip().lower())
-
-
-def _cell(row: list[str], index: int) -> str:
-    return str(row[index]).strip() if len(row) > index else ""
-
-
-def _row_text(header: list[str], row: list[str]) -> str:
-    pairs = []
-    for index, column in enumerate(header):
-        value = _cell(row, index)
-        if value:
-            pairs.append(f"{column}={value}")
-    return " | ".join(pairs)
-
-
-def _snapshot_key(keyword: str) -> str:
-    return " ".join(str(keyword or "").strip().lower().split())
+def _get(record: dict[str, Any], key: str) -> str:
+    return str(record.get(key, "") or "").strip()
 
 
 def _dt_text(value: datetime) -> str:
-    return value.strftime("%Y-%m-%d %H:%M:%S")
+    return _ensure_tz(value, "Asia/Seoul").strftime("%Y-%m-%d %H:%M:%S")
