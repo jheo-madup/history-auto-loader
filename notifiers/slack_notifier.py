@@ -18,6 +18,7 @@ SLACK_MEDIA_ALIASES = {
     "네이버SA_파워콘텐츠": "네이버 파워컨텐츠",
     "네이버 파워콘텐츠": "네이버 파워컨텐츠",
     "BS - 네이버": "브랜드검색",
+    "BS_네이버": "브랜드검색",
     "네이버 브랜드검색": "브랜드검색",
     "네이버BS": "브랜드검색",
 }
@@ -116,20 +117,33 @@ def format_slack_summary_message(
         spreadsheet_id = str(spreadsheet_id or DEFAULT_SPREADSHEET_ID).strip()
         url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit?gid=1211091820#gid=1211091820"
     lines = [
-        f"*<{url}|SA / AC 히스토리 자동 적재 완료>* - :red_circle: 수동 변경 내역 기준",
+        f"*<{url}|SA / AC 히스토리 자동 적재 완료>* `수동 변경 내역 기준`",
         "",
     ]
     lines.extend(f"{media}: {normalized_counts.get(media, 0)}건" for media in SLACK_MEDIA_ORDER)
     return "\n".join(lines)
 
 
-def count_rows_by_media(rows: list[dict[str, Any]]) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for row in rows:
-        media = str(row.get("매체", "") or "").strip()
-        if not media:
+def count_summary_items_from_summary_sheet(
+    values: list[list[Any]],
+    *,
+    date_text: str,
+) -> dict[str, int]:
+    counts = {media: 0 for media in SLACK_MEDIA_ORDER}
+    if len(values) < 2:
+        return counts
+
+    header = values[1]
+    summary_row = _summary_row_for_date(values, date_text)
+    if summary_row is None:
+        return counts
+
+    for index, media in enumerate(header):
+        normalized_media = _normalize_media_name(media)
+        if normalized_media not in counts:
             continue
-        counts[media] = counts.get(media, 0) + 1
+        cell_value = summary_row[index] if len(summary_row) > index else ""
+        counts[normalized_media] += _count_non_empty_lines(cell_value)
     return counts
 
 
@@ -150,7 +164,7 @@ def build_slack_summary_message(
 def _normalize_media_counts(media_counts: Mapping[str, int]) -> dict[str, int]:
     normalized = {media: 0 for media in SLACK_MEDIA_ORDER}
     for media, count in media_counts.items():
-        key = SLACK_MEDIA_ALIASES.get(str(media or "").strip(), str(media or "").strip())
+        key = _normalize_media_name(media)
         if key not in normalized:
             continue
         try:
@@ -158,6 +172,24 @@ def _normalize_media_counts(media_counts: Mapping[str, int]) -> dict[str, int]:
         except (TypeError, ValueError):
             continue
     return normalized
+
+
+def _normalize_media_name(media: Any) -> str:
+    text = str(media or "").strip()
+    return SLACK_MEDIA_ALIASES.get(text, text)
+
+
+def _summary_row_for_date(values: list[list[Any]], date_text: str) -> list[Any] | None:
+    target = str(date_text or "").strip()
+    for row in values[2:]:
+        if row and str(row[0] or "").strip() == target:
+            return row
+    return None
+
+
+def _count_non_empty_lines(value: Any) -> int:
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+    return sum(1 for line in text.split("\n") if line.strip())
 
 
 def _escape_slack(value: Any) -> str:

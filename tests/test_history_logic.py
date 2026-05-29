@@ -5,7 +5,10 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from collectors.auto_bid_sheet_change import build_auto_bid_rows_from_log_records
-from notifiers.slack_notifier import count_rows_by_media, format_slack_summary_message
+from notifiers.slack_notifier import (
+    count_summary_items_from_summary_sheet,
+    format_slack_summary_message,
+)
 from processors.filters import should_keep_raw
 from processors.google_media_router import classify_google_media
 from processors.summarizer import build_summary
@@ -366,26 +369,67 @@ class HistoryLogicTest(unittest.TestCase):
 
         self.assertEqual(
             first_line,
-            "*<https://docs.google.com/spreadsheets/d/1-pcaJCyUc3_DQPuNNZgDvc433Cdo2DbrwFsxLbxv95g/edit?gid=1211091820#gid=1211091820|SA / AC 히스토리 자동 적재 완료>* - :red_circle: 수동 변경 내역 기준",
+            "*<https://docs.google.com/spreadsheets/d/1-pcaJCyUc3_DQPuNNZgDvc433Cdo2DbrwFsxLbxv95g/edit?gid=1211091820#gid=1211091820|SA / AC 히스토리 자동 적재 완료>* `수동 변경 내역 기준`",
         )
         self.assertTrue(first_line.startswith("*<https://"))
-        self.assertIn("|SA / AC 히스토리 자동 적재 완료>* - :red_circle: 수동 변경 내역 기준", first_line)
-        self.assertNotIn("* - :red_circle: 수동 변경 내역 기준*", first_line)
+        self.assertIn("|SA / AC 히스토리 자동 적재 완료>* `수동 변경 내역 기준`", first_line)
+        self.assertIn("`수동 변경 내역 기준`", first_line)
+        self.assertNotIn("🔴", first_line)
+        self.assertNotIn(":red_circle:", first_line)
+        self.assertNotIn(">* -", first_line)
 
-    def test_slack_media_counts_use_final_daily_raw_rows(self) -> None:
-        rows = [
-            _row(media="네이버SA"),
-            _row(media="네이버SA"),
-            _row(media="구글SA"),
-            _row(media="BS - 네이버"),
-            _row(media="네이버 파워컨텐츠"),
+    def test_summary_sheet_count_counts_three_non_empty_lines(self) -> None:
+        values = [
+            [],
+            ["일자", "네이버SA"],
+            ["2026-05-29", "[m_상품_isa] 입찰가 변경 1건\n\n[m_상품_etf] 입찰가 변경 2건\n[m_일반_주력] 소재 OFF 1건"],
         ]
-        message = format_slack_summary_message(media_counts=count_rows_by_media(rows))
 
-        self.assertIn("네이버SA: 2건", message)
-        self.assertIn("구글SA: 1건", message)
+        counts = count_summary_items_from_summary_sheet(values, date_text="2026-05-29")
+
+        self.assertEqual(counts["네이버SA"], 3)
+
+    def test_summary_sheet_count_keeps_empty_cell_zero(self) -> None:
+        values = [
+            [],
+            ["일자", "네이버SA", "구글SA"],
+            ["2026-05-29", "", "   "],
+        ]
+
+        counts = count_summary_items_from_summary_sheet(values, date_text="2026-05-29")
+
+        self.assertEqual(counts["네이버SA"], 0)
+        self.assertEqual(counts["구글SA"], 0)
+
+    def test_summary_sheet_count_ignores_raw_rows_when_summary_is_empty(self) -> None:
+        raw_rows = [_row(media="네이버SA"), _row(media="네이버SA")]
+        values = [
+            [],
+            ["일자", "네이버SA"],
+            ["2026-05-29", ""],
+        ]
+
+        counts = count_summary_items_from_summary_sheet(values, date_text="2026-05-29")
+
+        self.assertEqual(len(raw_rows), 2)
+        self.assertEqual(counts["네이버SA"], 0)
+
+    def test_summary_sheet_count_uses_summary_lines_not_raw_count(self) -> None:
+        raw_rows = [_row(media="구글SA") for _ in range(5)]
+        values = [
+            [],
+            ["일자", "구글SA", "BS_네이버"],
+            ["2026-05-29", "캠페인 A 변경\n캠페인 B 변경", "브랜드 문구 변경"],
+        ]
+
+        counts = count_summary_items_from_summary_sheet(values, date_text="2026-05-29")
+        message = format_slack_summary_message(media_counts=counts)
+
+        self.assertEqual(len(raw_rows), 5)
+        self.assertEqual(counts["구글SA"], 2)
+        self.assertEqual(counts["브랜드검색"], 1)
+        self.assertIn("구글SA: 2건", message)
         self.assertIn("브랜드검색: 1건", message)
-        self.assertIn("네이버 파워컨텐츠: 1건", message)
 
 
 def _row(

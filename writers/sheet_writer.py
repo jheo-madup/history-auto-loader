@@ -10,6 +10,7 @@ import google.auth
 from gspread.exceptions import APIError, SpreadsheetNotFound, WorksheetNotFound
 from gspread.utils import rowcol_to_a1
 
+from notifiers.slack_notifier import count_summary_items_from_summary_sheet
 from processors.normalizer import RAW_COLUMNS
 from utils.datetime_utils import parse_change_datetime
 
@@ -217,6 +218,14 @@ class SheetWriter:
                 next_col += 1
         except APIError as exc:
             raise SheetWriterError(f"Summary 매체 컬럼 추가 실패: {exc}") from exc
+
+    def count_summary_items_from_summary_sheet(self, date_text: str) -> dict[str, int]:
+        worksheet = self._worksheet(self.settings.SUMMARY_WORKSHEET_NAME)
+        try:
+            values = worksheet.get_all_values()
+        except APIError as exc:
+            raise SheetWriterError(f"Summary 최종 건수 조회 실패: {exc}") from exc
+        return count_summary_items_from_summary_sheet(values, date_text=date_text)
 
     def _worksheet(self, name: str) -> gspread.Worksheet:
         try:

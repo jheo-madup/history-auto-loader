@@ -11,7 +11,7 @@ from collectors.google_ads_change import GoogleAdsChangeCollector
 from collectors.meta_change import MetaChangeCollector
 from collectors.naver_sa_change import NaverSAChangeCollector
 from config import settings
-from notifiers.slack_notifier import SlackNotifier, count_rows_by_media
+from notifiers.slack_notifier import SLACK_MEDIA_ORDER, SlackNotifier
 from processors.filters import apply_raw_filters
 from processors.google_media_router import route_google_media
 from processors.normalizer import (
@@ -317,7 +317,7 @@ def main() -> int:
             summary_all_rows = all_rows
             LOGGER.exception("Summary 원천 Raw 조회 실패: %s", exc)
 
-    summary_media_names = {
+    summary_media_names = set(SLACK_MEDIA_ORDER) | {
         media for media in media_rows
     } | {
         str(row.get("매체", "")).strip()
@@ -374,14 +374,20 @@ def main() -> int:
         LOGGER.warning("일부 매체 수집 실패: %s", media_errors)
     if raw_write_failed or summary_failed:
         return 1
-    SlackNotifier(settings=settings, logger=get_logger("slack")).send_summary(
-        date_text=run_date,
-        start_at=start_at,
-        end_at=end_at,
-        summaries=summary_texts,
-        media_counts=count_rows_by_media(summary_all_rows),
-        media_errors=media_errors,
-    )
+    slack_media_counts: dict[str, int] | None = None
+    try:
+        slack_media_counts = writer.count_summary_items_from_summary_sheet(date_text=run_date)
+    except SheetWriterError as exc:
+        LOGGER.exception("Slack 최종 요약 탭 건수 조회 실패: %s", exc)
+    if slack_media_counts is not None:
+        SlackNotifier(settings=settings, logger=get_logger("slack")).send_summary(
+            date_text=run_date,
+            start_at=start_at,
+            end_at=end_at,
+            summaries=summary_texts,
+            media_counts=slack_media_counts,
+            media_errors=media_errors,
+        )
     return 0
 
 
