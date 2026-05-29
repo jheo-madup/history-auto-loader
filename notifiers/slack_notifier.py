@@ -9,11 +9,14 @@ from typing import Any, Mapping
 
 SLACK_POST_MESSAGE_URL = "https://slack.com/api/chat.postMessage"
 DEFAULT_SPREADSHEET_ID = "1-pcaJCyUc3_DQPuNNZgDvc433Cdo2DbrwFsxLbxv95g"
-SLACK_MEDIA_ORDER = ("네이버SA", "구글SA", "구글AC", "네이버 파워컨텐츠")
+SLACK_MEDIA_ORDER = ("네이버SA", "구글SA", "구글AC", "네이버 파워컨텐츠", "브랜드검색")
 SLACK_MEDIA_ALIASES = {
     "네이버SA_파워콘텐츠": "네이버 파워컨텐츠",
     "네이버SA_파워컨텐츠": "네이버 파워컨텐츠",
     "네이버 파워콘텐츠": "네이버 파워컨텐츠",
+    "BS - 네이버": "브랜드검색",
+    "네이버 브랜드검색": "브랜드검색",
+    "네이버BS": "브랜드검색",
 }
 
 
